@@ -1,0 +1,2125 @@
+import { useState, useMemo, useCallback, useRef } from "react";
+import { BarChart, Bar, LineChart, Line, PieChart, Pie, Cell, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend } from "recharts";
+
+const C={compliant:"#22c55e",atRisk:"#f59e0b",nonCompliant:"#ef4444",accent:"#818cf8",blue:"#60a5fa",cyan:"#22d3ee",purple:"#c084fc",teal:"#2dd4bf",orange:"#fb923c",bg:"#07101f",card:"#0d1626",card2:"#111e30",border:"#1a2840",text:"#d1d9e6",muted:"#4a6080",bright:"#f0f4ff"};
+const hv=n=>Math.abs(Math.sin(n*127.1+311.7)*43758.5453)%1;
+const $usd=v=>v!=null?`$${Number(v).toLocaleString()}`:"—";
+const $n=v=>v!=null?Number(v).toLocaleString():"—";
+const $dt=v=>v?new Date(v).toLocaleDateString("en-US",{month:"short",day:"numeric",year:"2-digit"}):"—";
+const NOW=new Date("2026-03-12");
+const addD=d=>{const dt=new Date(NOW);dt.setDate(dt.getDate()+d);return dt.toISOString().split("T")[0];};
+const dF=d=>d?Math.round((new Date(d)-NOW)/86400000):null;
+
+const EP={Office:{t:68},Retail:{t:78},Industrial:{t:50},Residential:{t:58},Hotel:{t:108},"Senior Housing":{t:88},"Self-Storage":{t:20},"Operating Co":{t:75},Land:{t:0}};
+const BPS_MAP={Boston:"BERDO 2.0",Cambridge:"BEUDO",Chicago:"Chicago EBO",Seattle:"Seattle BPS",Washington:"DC BEPS",Denver:"Denver GBO",Portland:"Portland BER",Atlanta:"Atlanta BBO",Oakland:"Oakland EBO","Los Angeles":"LA EBO","San Jose":"CA AB 802",Minneapolis:"Minneapolis BETB",Austin:"Austin ECAD",Alexandria:"VA BEPS",Hoboken:"NJ Benchmarking",Fremont:"CA AB 802",Milpitas:"CA AB 802",Stockton:"CA AB 802",Vacaville:"CA AB 802","El Segundo":"LA EBO",Burbank:"LA EBO",Chatsworth:"LA EBO",Waldorf:"MD Benchmarking","St Paul":"St Paul BETB"};
+const INCENT_MAP={MA:["MassSave Rebate","Green Communities Grant"],IL:["ComEd Smart Ideas","Peoples Gas Rebates"],CA:["Utility Efficiency Rebates","IRA Tax Credits"],TX:["Oncor/Austin Energy Rebates","TX LoanSTAR"],WA:["PSE Efficiency Rebates","WA Commerce Grant"],CO:["Xcel Energy Rebates","CO Energy Office Grant"],OR:["Portland General Rebates","OR DOE Programs"],GA:["Georgia Power Rebates","Invest Atlanta"],MN:["Xcel Energy Programs","CenterPoint Rebates"],NJ:["PSE&G Energy Efficiency","NJ Clean Energy Program"],NY:["NYSERDA Programs","ConEd Rebates"],DC:["DCSEU Rebates","DC Green Finance"],FL:["Duke Energy Rebates","FPL Efficiency Programs"],AZ:["APS/SRP Rebates","AZ Commerce Authority"],CT:["Eversource Programs","CT Green Bank"],HI:["HECO Efficiency Programs","HI State Energy Office"],IN:["Duke Energy IN Rebates","NIPSCO Programs"],OH:["AEP Ohio Rebates","FirstEnergy Programs"],MD:["BGE/PEPCO Rebates","MD DHCD Programs"],VA:["Dominion Energy Rebates","VA Clean Economy"],NC:["Duke Energy Carolinas","NC Clean Energy Tech"],NV:["NV Energy Rebates","NV Office of Energy"],TN:["TVA Programs","Nashville Electric Rebates"],PA:["PECO Rebates","PA DEP Programs"],DE:["Delmarva Power Programs","DE DNREC"]};
+// Strict mode: "covered building" thresholds per jurisdiction BPS / performance standard law.
+const COVERED_REQS={
+  // NYC LL97 / LL84: 25,000 SF+
+  "New York":25000,
+  // Boston BERDO: 20,000 SF+
+  "Boston":20000,"Cambridge":20000,"Waltham":20000,"Marlborough":20000,
+  "Arlington":20000,"Franklin":20000,"Nantucket":20000,
+  // Chicago EBO: 50,000 SF+
+  "Chicago":50000,"Joliet":50000,"Westmont":50000,"Oak Park":50000,
+  "South Elgin":50000,"Lake Forest":50000,
+  // Seattle BPS: 20,000 SF+
+  "Seattle":20000,"Shoreline":20000,"Mukilteo":20000,
+  // DC BEPS: 50,000 SF+
+  "Washington":50000,
+  // Alexandria VA BEPS: 50,000 SF+
+  "Alexandria":50000,
+  // Denver GBO: 25,000 SF+
+  "Denver":25000,"Westminster":25000,"Aurora":25000,
+  // Portland BER: 20,000 SF+
+  "Portland":20000,"Happy Valley":20000,
+  // Atlanta BBO: 25,000 SF+
+  "Atlanta":25000,
+  // Minneapolis / St Paul BETB: 50,000 SF+
+  "Minneapolis":50000,"St Paul":50000,"Bloomington":50000,
+  // CA AB 802 / local BPS: 50,000 SF+
+  "Oakland":50000,"San Jose":50000,"Fremont":50000,"Milpitas":50000,
+  "Los Angeles":50000,"El Segundo":50000,"Burbank":50000,"Chatsworth":50000,
+  "Stockton":50000,"Vacaville":50000,"Sacramento":50000,"Hayward":50000,
+  "Lake Forest":50000,"Tracy":50000,"Escondido":50000,"La Mesa":50000,
+  "Agoura Hills":50000,"Santa Rosa":50000,"Napa":50000,"Newhall":50000,
+  // NJ benchmarking: 25,000 SF+
+  "Hoboken":25000,"Fairfield":25000,"Pine Brook":25000,
+  "Melville":25000,"Farmingdale":25000,
+  // MD: 50,000 SF+
+  "Waldorf":50000,
+  // PA (Philadelphia-area BPS): 50,000 SF+
+  "Blue Bell":50000,
+};
+
+// Strict mode: city-level audit thresholds (SF). Cities absent = no mandate.
+// Based on actual energy audit ordinances / BPS laws.
+const AUDIT_REQS={
+  // NYC LL87: every 10 yrs, 50,000 SF+
+  "New York":50000,
+  // Boston BERDO: 20,000 SF+
+  "Boston":20000,"Cambridge":20000,
+  // Chicago EBO: 50,000 SF+
+  "Chicago":50000,"South Elgin":50000,
+  // Seattle: retro-commissioning required, 50,000 SF+
+  "Seattle":50000,"Shoreline":50000,"Mukilteo":50000,
+  // DC BEPS: 50,000 SF+
+  "Washington":50000,
+  // Alexandria VA BEPS: 50,000 SF+
+  "Alexandria":50000,
+  // Denver GBO: 25,000 SF+
+  "Denver":25000,"Westminster":25000,"Aurora":25000,
+  // Portland BER: 20,000 SF+
+  "Portland":20000,"Happy Valley":20000,
+  // Atlanta BBO: 25,000 SF+
+  "Atlanta":25000,
+  // Minneapolis / St Paul BETB: 50,000 SF+
+  "Minneapolis":50000,"St Paul":50000,"Bloomington":50000,
+  // CA — select cities with local audit mandates (AB 802 benchmarking only statewide;
+  // audit mandates exist in SF, Oakland, LA)
+  "Oakland":50000,"Los Angeles":50000,"El Segundo":50000,
+  "Burbank":50000,"Chatsworth":50000,
+  // NJ — no statewide audit mandate; Hoboken has benchmarking only
+};
+
+// Strict mode: city-level benchmarking thresholds (SF). Cities absent = no mandate.
+const BENCH_REQS={
+  // NYC LL84: 25,000 SF+
+  "New York":25000,
+  // Boston BERDO / Cambridge BEUDO: 20,000 SF+
+  "Boston":20000,"Cambridge":20000,
+  // Chicago EBO: 50,000 SF+
+  "Chicago":50000,"South Elgin":50000,
+  // Seattle: 20,000 SF+
+  "Seattle":20000,"Shoreline":20000,"Mukilteo":20000,
+  // DC BEPS: 50,000 SF+
+  "Washington":50000,
+  // VA (Alexandria): 50,000 SF+
+  "Alexandria":50000,
+  // Denver GBO: 25,000 SF+
+  "Denver":25000,"Westminster":25000,"Aurora":25000,
+  // Portland BER: 20,000 SF+
+  "Portland":20000,"Happy Valley":20000,
+  // Atlanta BBO: 25,000 SF+
+  "Atlanta":25000,
+  // Minneapolis / St Paul BETB: 50,000 SF+
+  "Minneapolis":50000,"St Paul":50000,"Bloomington":50000,
+  // CA AB 802: 50,000 SF+ statewide
+  "Oakland":50000,"San Jose":50000,"Fremont":50000,"Milpitas":50000,
+  "Los Angeles":50000,"El Segundo":50000,"Burbank":50000,"Chatsworth":50000,
+  "Stockton":50000,"Vacaville":50000,"Sacramento":50000,"Hayward":50000,
+  "Lake Forest":50000,"Tracy":50000,"Escondido":50000,"La Mesa":50000,
+  "Agoura Hills":50000,"Santa Rosa":50000,"Napa":50000,"Newhall":50000,
+  // NJ benchmarking (Hoboken): 25,000 SF+
+  "Hoboken":25000,"Fairfield":25000,"Pine Brook":25000,"Melville":25000,"Farmingdale":25000,
+  // MD: 50,000 SF+
+  "Waldorf":50000,
+};
+const RETROS=["Complete","In Progress","Planned","Not Started"];
+const CERTS=["LEED Platinum","LEED Gold","LEED Silver","ENERGY STAR","None","None","None","None"];
+
+const RAW=[
+  [1,"400 Capital Blvd","Rocky Hill","CT","Office",101260],[2,"Louis Joliet Pointe","Joliet","IL","Retail",238677],[3,"LJP Lot","Joliet","IL","Land",0],[4,"Somerset Court","Waltham","MA","Office",68599],[5,"Parkway","Bloomington","IL","Retail",217345],[6,"4700 Falls of Neuse","Raleigh","NC","Office",173831],[7,"Parker Ranch Center","Kamuela","HI","Retail",146757],[8,"Northpoint","Austin","TX","Office",151126],[9,"Locke Drive","Marlborough","MA","Industrial",296585],[10,"Lakeside Commons","Atlanta","GA","Office",530833],
+  [11,"Cordia Senior Living","Westmont","IL","Senior Housing",108668],[12,"International Village","Bloomington","MN","Residential",274529],[13,"Marine Home Center","Nantucket","MA","Operating Co",127956],[14,"Watermark Senior Living","Blue Bell","PA","Senior Housing",296470],[15,"Lake Forest Retail","Lake Forest","CA","Retail",118287],[16,"Central Plaza","Cambridge","MA","Office",170570],[17,"Tucson Portfolio","Tucson","AZ","Industrial",418788],[18,"SV - Fremont","Fremont","CA","Industrial",236142],[19,"SV - Milpitas","Milpitas","CA","Industrial",342362],[20,"Riverview at Upper Landing","St Paul","MN","Residential",356331],
+  [21,"Oak Park","Oak Park","IL","Residential",105648],[22,"Vacaville Industrial","Vacaville","CA","Industrial",582900],[23,"Westheimer","Houston","TX","Residential",233502],[24,"Sawyer Heights","Houston","TX","Residential",307402],[25,"Vine","Hoboken","NJ","Residential",154688],[26,"Brigham Square","Arlington","MA","Residential",107083],[27,"Westhaven","Seattle","WA","Residential",150000],[28,"Regency Pines","Cary","NC","Office",124944],[29,"University Bldg I","Phoenix","AZ","Industrial",116078],[30,"University Bldg II","Phoenix","AZ","Industrial",52027],
+  [31,"Geneva Building","Tempe","AZ","Industrial",48908],[32,"Pressler","Austin","TX","Residential",179263],[33,"5th St Commons","Austin","TX","Residential",170219],[34,"2900 Eisenhower Ave","Alexandria","VA","Office",59778],[35,"Niche 905","Chicago","IL","Residential",178365],[36,"Great Hills Corp","Austin","TX","Office",198056],[37,"Chancellor Centre","Austin","TX","Office",46264],[38,"Stonecliff","Austin","TX","Office",66159],[39,"3307 Northland","Austin","TX","Office",99089],[40,"Greystone Plaza","Austin","TX","Office",78712],
+  [41,"Greystone Plaza II","Austin","TX","Office",47189],[42,"7 Seventy House","Hoboken","NJ","Residential",400989],[43,"Watermill Center","Waltham","MA","Office",209406],[44,"Midtown at Delray","Delray Beach","FL","Residential",191897],[45,"Artessa at Quarry Village","San Antonio","TX","Residential",393893],[46,"Regency Creek","Cary","NC","Office",122087],[47,"Saratoga Downs","Napa","CA","Residential",217122],[48,"100 Cambridge","Boston","MA","Office",599696],[49,"Jefferson Hotel","Chicago","IL","Hotel",264134],[50,"6300 Wilshire Blvd","Los Angeles","CA","Office",404611],
+  [51,"645 H Street","Washington","DC","Office",84724],[52,"The Alexandar","Santa Rosa","CA","Residential",211055],[53,"One Coach Way","Jacksonville","FL","Industrial",851696],[54,"Reflections on 92nd","Westminster","CO","Residential",340674],[55,"The Catherine","Scottsdale","AZ","Residential",549493],[56,"The Dutton","Hayward","CA","Residential",452058],[57,"Parmer Business Park","Austin","TX","Office",259473],[58,"Nolina Flats","Austin","TX","Residential",270264],[59,"Abelia Flats","Austin","TX","Residential",388754],[60,"Plaza on the Lake","Austin","TX","Office",237489],
+  [61,"Apollo at Rosecrans","El Segundo","CA","Office",547805],[62,"Two Canal Park","Cambridge","MA","Office",206313],[63,"Ten Canal Park","Cambridge","MA","Office",118610],[64,"On the Green","Mukilteo","WA","Residential",272474],[65,"3055 Orchard","San Jose","CA","Industrial",111285],[66,"60 South Market St","San Jose","CA","Office",244405],[67,"Riverwalk at Happy Valley","Happy Valley","OR","Residential",350910],[68,"Legacy Tower","Plano","TX","Office",342033],[69,"Fairfield Industrial I","Fairfield","NJ","Industrial",92285],[70,"Fairfield Industrial II & III","Fairfield","NJ","Industrial",189627],
+  [71,"Fairfield Industrial IV","Fairfield","NJ","Industrial",125692],[72,"Pine Brook A&B","Pine Brook","NJ","Industrial",182589],[73,"Pine Brook C","Pine Brook","NJ","Industrial",133563],[74,"MSP Airport Hotel","Minneapolis","MN","Hotel",252883],[75,"8080 NCX Office Tower","Dallas","TX","Office",289480],[76,"1000 Mass Ave","Cambridge","MA","Office",105574],[77,"Hendrix","Escondido","CA","Residential",238052],[78,"Hadley","Escondido","CA","Residential",174828],[79,"Key at 12th","Oakland","CA","Office",351410],[80,"2280 N Greenville","Richardson","TX","Office",228506],
+  [81,"Echo Lake","Shoreline","WA","Residential",245915],[82,"Marine Wharf Hotel","Boston","MA","Hotel",306192],[83,"5th and Colorado","Austin","TX","Office",179351],[84,"1280 Mass Ave","Cambridge","MA","Office",42253],[85,"Station 650","Alexandria","VA","Residential",169000],[86,"Burbank Connexion","Burbank","CA","Office",340881],[87,"Lighthouse","Seattle","WA","Residential",235834],[88,"Blackfan","Boston","MA","Office",192140],[89,"Burnham Pointe","Chicago","IL","Residential",315687],[90,"The District E&W","La Mesa","CA","Residential",482690],
+  [91,"Stonebridge Plaza","Austin","TX","Office",387084],[92,"2811 Orchard","San Jose","CA","Industrial",84696],[93,"SuperValu Distribution Ctr","Joliet","IL","Industrial",968250],[94,"Porte","Chicago","IL","Residential",486084],[95,"Heartline","Portland","OR","Office",72137],[96,"19 Chapin","Pine Brook","NJ","Industrial",529110],[97,"811 Fulton","Chicago","IL","Office",64877],[98,"100 Bowes","South Elgin","IL","Industrial",158810],[99,"Roosevelt Commons","Seattle","WA","Office",229299],[100,"The Kincaid at Legacy","Plano","TX","Residential",372260],
+  [101,"955 Mass Ave","Cambridge","MA","Office",90416],[102,"800 West Lake","Chicago","IL","Land",0],[103,"1045 West Fulton","Chicago","IL","Office",143294],[104,"400 University","Seattle","WA","Office",114303],[105,"Kelmscott Park","Lake Forest","IL","Residential",135396],[106,"Farmingdale Industrial Ctr","Farmingdale","NY","Industrial",360391],[107,"Chatsworth Logistics Ctr","Chatsworth","CA","Industrial",221842],[108,"Waterstone","Tracy","CA","Residential",152564],[109,"Lakeland FL Logistics Ctr","Lakeland","FL","Industrial",710962],[110,"1919 Webster","Oakland","CA","Land",0],
+  [111,"Waldorf MD Logistics Ctr","Waldorf","MD","Industrial",383827],[112,"Taluswood","Mountlake Terrace","WA","Residential",407296],[113,"Gateway","Seattle","WA","Office",261420],[114,"Broadleaf","Sacramento","CA","Residential",253984],[115,"Denver Logistics Ctr","Denver","CO","Industrial",147001],[116,"South Standard","Boston","MA","Residential",166552],[117,"Henderson NV Logistics Ctr","Henderson","NV","Industrial",147000],[118,"Garden Grove","Tempe","AZ","Residential",310400],[119,"222 Fifth","Seattle","WA","Office",201448],[120,"1200 Broadway","Nashville","TN","Residential",419680],
+  [121,"Stone Cliff","Aurora","CO","Residential",336144],[122,"920 N. Wells","Chicago","IL","Residential",214219],[123,"300 Financial Park Dr","Franklin","MA","Industrial",300000],[124,"80 Ruland","Melville","NY","Industrial",84140],[125,"868 N Wells / 871 Franklin","Chicago","IL","Residential",358485],[126,"Cooper Tire Distribution","Whiteland","IN","Industrial",996930],[127,"10 West Commerce","Buckeye","AZ","Industrial",862622],[128,"Stockton Industrial Portfolio","Stockton","CA","Industrial",877648],[129,"Ancora","Orlando","FL","Residential",280022],[130,"Richmond Distribution Ctr","Richmond","VA","Industrial",446500],
+  [131,"Yard 5","Boston","MA","Industrial",196670],[132,"The Lexington","Agoura Hills","CA","Residential",163094],[133,"Stryker Distribution Ctr","Mooresville","IN","Industrial",646380],[134,"5th & John","Seattle","WA","Land",0],[135,"GE Aviation Mfg Ctr","Beavercreek","OH","Industrial",280862],[136,"Dominos Mfg Ctr","Crown Point","IN","Industrial",111650],[137,"Stockton Commerce Center","Stockton","CA","Industrial",655976],[138,"Carl Court Self Storage","Newhall","CA","Self-Storage",94278],
+];
+
+function enrich([id,name,city,state,type,sf],idx){
+  const isLand=!sf||type==="Land";
+  if(isLand) return{id,name,city,state,type,sf:sf||0,isLand:true,status:"N/A",eui:null,target:null,penalty:0,bpsJuris:false,covered:false,needsBench:false,needsAudit:false,juris:"N/A",incentives:INCENT_MAP[state]||[],incentAmt:0,openDef:0,capNeed:0,eStar:null,s1:0,s2:0,eci:null,cost:0,yoyEui:null,decarb:false,impl:null,retro:null,cert:null,ghgInt:null,benchDue:null,auditDue:null,bpsDue:null};
+  const p=EP[type]||EP.Office;
+  const v1=hv(idx),v2=hv(idx*2+1),v3=hv(idx*3+2),v4=hv(idx*4+3),v5=hv(idx*5+4);
+  const eui=parseFloat((p.t*(0.65+v1*0.85)).toFixed(1));
+  const target=p.t+Math.round((v2-0.5)*10);
+  const wnEui=parseFloat((eui*(0.93+v3*0.07)).toFixed(1));
+  const over=eui>target,pctOver=over?(eui-target)/target:0;
+  const status=!over?"Compliant":pctOver>0.20?"Non-Compliant":"At-Risk";
+  const juris=BPS_MAP[city]||"N/A",bpsJuris=juris!=="N/A";
+  const covered=!!(COVERED_REQS[city]&&sf>=COVERED_REQS[city]);needsBench=!!(BENCH_REQS[city]&&sf>=BENCH_REQS[city]);
+  const needsAudit=!!(AUDIT_REQS[city]&&sf>=AUDIT_REQS[city]);
+  const eStar=Math.max(1,Math.min(99,Math.round(38+(1-pctOver*2.2)*48+v4*14)));
+  const ghgInt=parseFloat((eui*0.088*(0.7+v5*0.6)).toFixed(1));
+  const s1=Math.round(sf*0.0014*(0.5+hv(idx*13)));
+  const s2=Math.round(sf*0.0028*(0.5+hv(idx*17)));
+  const eci=parseFloat((2.2+hv(idx*19)*3.2).toFixed(2));
+  const cost=Math.round(sf*eci/1000);
+  let penalty=0,penType="None";
+  if(status==="Non-Compliant"&&bpsJuris){penalty=Math.round(sf*pctOver*1.8*(0.5+hv(idx*23)*0.8));penType=juris+" Exceedance";}
+  else if(status==="At-Risk"&&bpsJuris){penalty=Math.round(sf*0.025*hv(idx*29));penType="Potential BPS Penalty";}
+  else if(status==="Non-Compliant"){penalty=Math.round(6000+hv(idx*31)*22000);penType="Benchmark Late Fee";}
+  const openDef=status==="Non-Compliant"?Math.round(7+hv(idx*37)*14):status==="At-Risk"?Math.round(2+hv(idx*41)*7):Math.round(hv(idx*43)*3);
+  const impl=status==="Compliant"?Math.round(72+hv(idx*47)*28):status==="At-Risk"?Math.round(38+hv(idx*53)*37):Math.round(12+hv(idx*59)*32);
+  const capNeed=Math.round(sf*(status==="Compliant"?12+hv(idx*61)*38:status==="At-Risk"?42+hv(idx*67)*88:105+hv(idx*71)*275));
+  const retro=RETROS[status==="Compliant"?Math.round(hv(idx*73)*1.5):status==="At-Risk"?1+Math.round(hv(idx*79)*1.5):Math.min(3,2+Math.round(hv(idx*83)))];
+  const cert=CERTS[Math.floor(hv(idx*89)*CERTS.length)];
+  const yoyEui=parseFloat((-7+hv(idx*97)*11).toFixed(1));
+  const decarb=status!=="Non-Compliant"&&hv(idx*101)>0.4;
+  const iList=(INCENT_MAP[state]||[]).slice(0,1+Math.round(hv(idx*113)));
+  const iAmt=Math.round(sf*(0.5+hv(idx*127)*2.5)*(bpsJuris?1.5:1.0));
+  return{id,name,city,state,type,sf,isLand:false,eui,target,wnEui,eStar,ghgInt,s1,s2,eci,cost,status,juris,bpsJuris,covered,needsBench,needsAudit,penalty,penType,openDef,impl,capNeed,retro,cert,yoyEui,decarb,benchDue:addD(Math.round(-50+hv(idx*103)*370)),auditDue:needsAudit?addD(Math.round(25+hv(idx*107)*560)):null,bpsDue:bpsJuris?addD(Math.round(-80+hv(idx*109)*680)):null,lastAudit:addD(-180-Math.round(hv(idx*131)*400)),incentives:iList,incentAmt:iAmt};
+}
+
+const BUILDINGS=RAW.map((r,i)=>enrich(r,i+1));
+const ACTIVE=BUILDINGS.filter(b=>!b.isLand&&b.sf>0);
+
+const MONTHLY=[{m:"Apr '25",eui:79.2,ghg:7.2,cost:4820},{m:"May '25",eui:76.8,ghg:7.0,cost:4670},{m:"Jun '25",eui:82.4,ghg:7.5,cost:5010},{m:"Jul '25",eui:86.1,ghg:7.8,cost:5240},{m:"Aug '25",eui:84.7,ghg:7.7,cost:5150},{m:"Sep '25",eui:80.3,ghg:7.3,cost:4890},{m:"Oct '25",eui:76.1,ghg:6.9,cost:4630},{m:"Nov '25",eui:77.8,ghg:7.1,cost:4730},{m:"Dec '25",eui:81.9,ghg:7.4,cost:4980},{m:"Jan '26",eui:85.4,ghg:7.7,cost:5190},{m:"Feb '26",eui:83.2,ghg:7.6,cost:5060},{m:"Mar '26",eui:79.8,ghg:7.3,cost:4850}];
+const PENALTY_PROJ=[{yr:"2026",v:8200},{yr:"2027",v:12400},{yr:"2028",v:18700},{yr:"2029",v:26100},{yr:"2030",v:38500}];
+
+function ComplianceTab({stats}){
+  // Deadline tracker state
+  const [dlTypeF,setDlTypeF]=useState("all");
+  const [dlBandF,setDlBandF]=useState("all");
+  const [expandedDl,setExpandedDl]=useState(null);
+
+  // Penalty table state
+  const [penJurisF,setPenJurisF]=useState("all");
+  const [penStateF,setPenStateF]=useState("all");
+  const [penTypeF,setPenTypeF]=useState("all");
+  const [expandedPen,setExpandedPen]=useState(null);
+  const [penPage,setPenPage]=useState(0);
+  const [penSortCol,setPenSortCol]=useState("penalty");
+  const [penSortDir,setPenSortDir]=useState("desc");
+  const PEN_PAGE=20;
+
+  const bandDefs=[
+    {key:"overdue",label:"Overdue",color:C.nonCompliant,fn:d=>d<0},
+    {key:"30",label:"≤ 30 Days",color:C.nonCompliant,fn:d=>d>=0&&d<=30},
+    {key:"60",label:"31–60 Days",color:C.atRisk,fn:d=>d>30&&d<=60},
+    {key:"90",label:"61–90 Days",color:"#eab308",fn:d=>d>60&&d<=90},
+    {key:"90p",label:"90+ Days",color:C.compliant,fn:d=>d>90},
+  ];
+
+  const filteredDl=useMemo(()=>{
+    let arr=stats.deadlines;
+    if(dlTypeF!=="all") arr=arr.filter(d=>d.type===dlTypeF);
+    if(dlBandF!=="all"){const band=bandDefs.find(b=>b.key===dlBandF);if(band) arr=arr.filter(d=>band.fn(d.days));}
+    return arr;
+  },[dlTypeF,dlBandF,stats.deadlines]);
+
+  const allJuris=[...new Set(ACTIVE.map(b=>b.juris).filter(j=>j&&j!=="N/A"))].sort();
+  const allPenStates=[...new Set(ACTIVE.map(b=>b.state))].sort();
+  const allPenTypes=[...new Set(ACTIVE.map(b=>b.penType).filter(p=>p&&p!=="None"))].sort();
+
+  const filteredPen=useMemo(()=>{
+    let arr=[...ACTIVE];
+    if(penJurisF!=="all") arr=arr.filter(b=>b.juris===penJurisF);
+    if(penStateF!=="all") arr=arr.filter(b=>b.state===penStateF);
+    if(penTypeF!=="all") arr=arr.filter(b=>b.penType===penTypeF);
+    arr.sort((a,b2)=>{
+      let av=a[penSortCol],bv=b2[penSortCol];
+      if(typeof av==="string"){av=av.toLowerCase();bv=(bv||"").toLowerCase();}
+      if(av==null)return 1;if(bv==null)return -1;
+      return penSortDir==="asc"?(av>bv?1:-1):(av<bv?1:-1);
+    });
+    return arr;
+  },[penJurisF,penStateF,penTypeF,penSortCol,penSortDir]);
+
+  const pagedPen=filteredPen.slice(penPage*PEN_PAGE,(penPage+1)*PEN_PAGE);
+  const penTotalPages=Math.ceil(filteredPen.length/PEN_PAGE);
+  const filteredPenTotal=filteredPen.reduce((a,b)=>a+b.penalty,0);
+  const filteredCapTotal=filteredPen.reduce((a,b)=>a+b.capNeed,0);
+
+  // Violation type breakdown for chart
+  const violationBreakdown=useMemo(()=>{
+    const map={};
+    ACTIVE.forEach(b=>{if(b.penalty>0){const k=b.penType||"Other";map[k]=(map[k]||0)+b.penalty;}});
+    return Object.entries(map).map(([type,amount])=>({type:type.length>28?type.slice(0,26)+"…":type,amount})).sort((a,b)=>b.amount-a.amount);
+  },[]);
+
+  function sortPen(col){if(penSortCol===col)setPenSortDir(d=>d==="asc"?"desc":"asc");else{setPenSortCol(col);setPenSortDir("desc");}setPenPage(0);}
+  const penTh=(col,label)=>(
+    <th onClick={()=>sortPen(col)} style={{padding:"8px 10px",textAlign:"left",color:penSortCol===col?C.accent:C.muted,fontWeight:600,fontSize:10,borderBottom:`1px solid ${C.border}`,whiteSpace:"nowrap",background:penSortCol===col?`${C.accent}18`:C.card2,cursor:"pointer",userSelect:"none"}}>
+      {label}{penSortCol===col?(penSortDir==="asc"?" ↑":" ↓"):""}
+    </th>
+  );
+  const td2=(content,extra={})=><td style={{padding:"7px 10px",fontSize:11,...extra}}>{content}</td>;
+
+  return(
+    <div style={{display:"flex",flexDirection:"column",gap:12}}>
+      {/* KPIs */}
+      <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
+        <KpiCard label="Total Penalty Exposure" value={$usd(stats.totalPen)} sub="Current year" color={C.nonCompliant}/>
+        <KpiCard label="Capital Needed" value={`${(stats.totalCap/1000000).toFixed(0)}M`} sub="For compliance" color={C.atRisk}/>
+        <KpiCard label="BPS Perf. Gaps" value={stats.bpsGaps} sub="Over target in BPS juris." color={C.atRisk}/>
+        <KpiCard label="Missing Filings" value={stats.missingFilings} sub="Overdue deadlines" color={C.nonCompliant}/>
+        <KpiCard label="Overdue Deadlines" value={stats.deadlines.filter(d=>d.days<0).length} sub="Missed" color={C.nonCompliant}/>
+        <KpiCard label="Due ≤ 30 Days" value={stats.deadlines.filter(d=>d.days>=0&&d.days<=30).length} sub="Urgent" color={C.atRisk}/>
+      </div>
+
+      {/* ── DEADLINE TRACKER ── */}
+      <Card>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",flexWrap:"wrap",gap:8,marginBottom:12}}>
+          <div>
+            <div style={{fontSize:13,fontWeight:700,color:C.bright}}>⏱ Deadline Tracker</div>
+            <div style={{fontSize:10,color:C.muted,marginTop:2}}>Click any row to see full building detail</div>
+          </div>
+          <div style={{display:"flex",gap:6,flexWrap:"wrap",alignItems:"center"}}>
+            <span style={{fontSize:10,color:C.muted}}>Type:</span>
+            {["all","Benchmark","Audit","BPS Filing"].map(v=>(
+              <button key={v} onClick={()=>setDlTypeF(v)} style={{padding:"3px 9px",borderRadius:20,fontSize:10,cursor:"pointer",border:`1px solid ${C.border}`,background:dlTypeF===v?C.accent:"transparent",color:dlTypeF===v?C.bright:C.muted}}>{v==="all"?"All Types":v}</button>
+            ))}
+            <span style={{fontSize:10,color:C.muted,marginLeft:4}}>Urgency:</span>
+            <select value={dlBandF} onChange={e=>setDlBandF(e.target.value)} style={{padding:"3px 8px",borderRadius:6,border:`1px solid ${C.border}`,background:C.card2,color:C.text,fontSize:10}}>
+              <option value="all">All Urgency</option>
+              {bandDefs.map(b=><option key={b.key} value={b.key}>{b.label}</option>)}
+            </select>
+            <span style={{fontSize:10,color:C.muted,marginLeft:4}}>{filteredDl.length} deadlines</span>
+          </div>
+        </div>
+
+        {/* Group by urgency band */}
+        {bandDefs.map(band=>{
+          const items=filteredDl.filter(d=>band.fn(d.days));
+          if(!items.length)return null;
+          return(
+            <div key={band.key} style={{marginBottom:14}}>
+              <div style={{fontSize:11,fontWeight:700,color:band.color,textTransform:"uppercase",letterSpacing:".5px",marginBottom:6,display:"flex",alignItems:"center",gap:6}}>
+                <div style={{width:7,height:7,borderRadius:"50%",background:band.color}}/>
+                {band.label} — {items.length} deadline{items.length>1?"s":""}
+              </div>
+              <div style={{display:"flex",flexDirection:"column",gap:2}}>
+                {items.map((d,i)=>{
+                  const u=urgency(d.days);
+                  const bld=ACTIVE.find(b=>b.name===d.bld);
+                  const rowKey=`${d.bld}|${d.type}`;
+                  const isOpen=expandedDl===rowKey;
+                  return(
+                    <div key={i}>
+                      <div onClick={()=>setExpandedDl(isOpen?null:rowKey)}
+                        style={{display:"flex",alignItems:"center",gap:10,padding:"8px 12px",background:isOpen?`${band.color}12`:C.card2,borderRadius:isOpen?"5px 5px 0 0":5,border:`1px solid ${isOpen?band.color:C.border}`,cursor:"pointer",transition:"all .15s"}}>
+                        <div style={{width:6,height:6,borderRadius:"50%",background:u.color,flexShrink:0}}/>
+                        <div style={{flex:2,fontWeight:600,color:C.bright,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{d.bld}</div>
+                        <div style={{fontSize:10,color:C.muted,flex:1,whiteSpace:"nowrap"}}>{d.type}</div>
+                        <div style={{fontSize:10,color:bld?.juris&&bld.juris!=="N/A"?C.cyan:C.muted,flex:1,whiteSpace:"nowrap"}}>{bld?.juris||"—"}</div>
+                        <div style={{fontSize:10,color:C.muted,width:90,whiteSpace:"nowrap"}}>{$dt(d.date)}</div>
+                        <div style={{fontSize:11,fontWeight:800,color:u.color,minWidth:100,textAlign:"right"}}>{u.label}</div>
+                        <div style={{fontSize:10,color:band.color,marginLeft:4}}>{isOpen?"▲":"▼"}</div>
+                      </div>
+                      {isOpen&&bld&&(
+                        <div style={{background:`${band.color}08`,border:`1px solid ${band.color}`,borderTop:"none",borderRadius:"0 0 5px 5px",padding:"12px 14px"}}>
+                          <div style={{display:"flex",gap:16,flexWrap:"wrap"}}>
+                            {[
+                              {label:"Building Type",value:bld.type},
+                              {label:"Gross SF",value:$n(bld.sf)},
+                              {label:"City / State",value:`${bld.city}, ${bld.state}`},
+                              {label:"Jurisdiction",value:bld.juris},
+                              {label:"EUI",value:`${bld.eui} (target: ${bld.target})`},
+                              {label:"Compliance Status",value:<span style={sBadge(bld.status)}>{bld.status}</span>},
+                              {label:"ENERGY STAR",value:bld.eStar,color:bld.eStar>=75?C.compliant:bld.eStar>=50?C.atRisk:C.nonCompliant},
+                              {label:"Penalty Exposure",value:bld.penalty>0?$usd(bld.penalty):"None",color:bld.penalty>0?C.nonCompliant:C.compliant},
+                              {label:"Capital Needed",value:$usd(bld.capNeed),color:C.atRisk},
+                              {label:"Last Audit",value:$dt(bld.lastAudit)},
+                              {label:"Retro-Comm.",value:bld.retro,color:bld.retro==="Complete"?C.compliant:bld.retro==="Not Started"?C.nonCompliant:C.atRisk},
+                              {label:"Decarb Pathway",value:bld.decarb?"Yes":"No",color:bld.decarb?C.compliant:C.muted},
+                            ].map(({label,value,color})=>(
+                              <div key={label} style={{minWidth:130}}>
+                                <div style={{fontSize:9,color:C.muted,textTransform:"uppercase",letterSpacing:".4px",marginBottom:2}}>{label}</div>
+                                <div style={{fontSize:12,fontWeight:600,color:color||C.bright}}>{value}</div>
+                              </div>
+                            ))}
+                          </div>
+                          {/* Other deadlines for same building */}
+                          <div style={{marginTop:10,paddingTop:8,borderTop:`1px solid ${band.color}30`}}>
+                            <div style={{fontSize:10,color:C.muted,marginBottom:5,fontWeight:600}}>ALL DEADLINES FOR THIS BUILDING</div>
+                            <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
+                              {[{label:"Benchmark",date:bld.benchDue},{label:"Audit",date:bld.auditDue},{label:"BPS Filing",date:bld.bpsDue}].map(({label,date})=>{
+                                if(!date)return<div key={label} style={{fontSize:10,color:C.muted,padding:"3px 8px",borderRadius:4,background:C.card,border:`1px solid ${C.border}`}}>{label}: N/A</div>;
+                                const d2=dF(date),u2=urgency(d2);
+                                return<div key={label} style={{fontSize:10,padding:"3px 8px",borderRadius:4,background:`${u2.color}15`,border:`1px solid ${u2.color}40`,color:u2.color,fontWeight:600}}>{label}: {$dt(date)} ({u2.label})</div>;
+                              })}
+                            </div>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          );
+        })}
+        {filteredDl.length===0&&<div style={{padding:"20px",textAlign:"center",color:C.muted,fontSize:12}}>No deadlines match the selected filters.</div>}
+      </Card>
+
+      {/* ── PENALTY TABLE ── */}
+      <Card>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",flexWrap:"wrap",gap:8,marginBottom:12}}>
+          <div>
+            <div style={{fontSize:13,fontWeight:700,color:C.bright}}>💸 Penalty Exposure — All Buildings</div>
+            <div style={{fontSize:10,color:C.muted,marginTop:2}}>Click any row to expand violation detail</div>
+          </div>
+          <div style={{display:"flex",gap:6,flexWrap:"wrap",alignItems:"center"}}>
+            <select value={penStateF} onChange={e=>{setPenStateF(e.target.value);setPenPage(0);}} style={{padding:"3px 8px",borderRadius:6,border:`1px solid ${C.border}`,background:C.card2,color:C.text,fontSize:10}}>
+              <option value="all">All States</option>
+              {allPenStates.map(s=><option key={s} value={s}>{s}</option>)}
+            </select>
+            <select value={penJurisF} onChange={e=>{setPenJurisF(e.target.value);setPenPage(0);}} style={{padding:"3px 8px",borderRadius:6,border:`1px solid ${C.border}`,background:C.card2,color:C.text,fontSize:10}}>
+              <option value="all">All Jurisdictions</option>
+              {allJuris.map(j=><option key={j} value={j}>{j}</option>)}
+            </select>
+            <select value={penTypeF} onChange={e=>{setPenTypeF(e.target.value);setPenPage(0);}} style={{padding:"3px 8px",borderRadius:6,border:`1px solid ${C.border}`,background:C.card2,color:C.text,fontSize:10}}>
+              <option value="all">All Violation Types</option>
+              {allPenTypes.map(t=><option key={t} value={t}>{t}</option>)}
+            </select>
+            <span style={{fontSize:10,color:C.muted}}>{filteredPen.length} buildings</span>
+          </div>
+        </div>
+
+        {/* Violation type breakdown chart */}
+        <div style={{marginBottom:14}}>
+          <div style={{fontSize:11,fontWeight:600,color:C.muted,marginBottom:6,textTransform:"uppercase",letterSpacing:".4px"}}>Penalty Exposure by Violation Type</div>
+          <ResponsiveContainer width="100%" height={160}>
+            <BarChart data={violationBreakdown} layout="vertical" margin={{top:0,right:80,bottom:0,left:8}}>
+              <CartesianGrid strokeDasharray="3 3" stroke={C.border} horizontal={false}/>
+              <XAxis type="number" tick={{fill:C.muted,fontSize:9}} tickFormatter={v=>`${(v/1000).toFixed(0)}K`}/>
+              <YAxis type="category" dataKey="type" tick={{fill:C.muted,fontSize:9}} width={180}/>
+              <Tooltip {...tt} formatter={v=>[$usd(v),"Exposure"]}/>
+              <Bar dataKey="amount" radius={[0,3,3,0]}>
+                {violationBreakdown.map((_,i)=><Cell key={i} fill={i===0?C.nonCompliant:i===1?"#f97316":C.atRisk}/>)}
+              </Bar>
+            </BarChart>
+          </ResponsiveContainer>
+        </div>
+
+        <div style={{overflowX:"auto"}}>
+          <table style={{width:"100%",borderCollapse:"collapse",fontSize:11}}>
+            <thead>
+              <tr>{[["name","Building"],["city","City"],["state","ST"],["juris","Jurisdiction"],["penType","Violation Type"],["penalty","Est. Penalty"],["impl","Impl%"],["capNeed","Cap Needed"],["status","Status"]].map(([col,label])=>penTh(col,label))}</tr>
+            </thead>
+            <tbody>
+              {pagedPen.map((b,i)=>{
+                const isOpen=expandedPen===b.id;
+                return(
+                  <>
+                    <tr key={b.id} onClick={()=>setExpandedPen(isOpen?null:b.id)}
+                      style={{borderBottom:`1px solid ${isOpen?C.accent:C.border}`,background:isOpen?`${C.accent}10`:i%2===0?"transparent":C.card2,cursor:"pointer"}}>
+                      {td2(<div style={{display:"flex",alignItems:"center",gap:6}}><span style={{fontSize:9,color:isOpen?C.accent:C.muted}}>{isOpen?"▼":"▶"}</span>{b.name}</div>,{color:C.bright,fontWeight:600,whiteSpace:"nowrap"})}
+                      {td2(b.city,{color:C.muted})}
+                      {td2(b.state,{color:C.muted})}
+                      {td2(b.juris,{color:C.muted,fontSize:10,whiteSpace:"nowrap"})}
+                      {td2(<span style={{padding:"2px 6px",borderRadius:4,background:b.penalty>0?`${C.atRisk}20`:`${C.compliant}15`,border:`1px solid ${b.penalty>0?C.atRisk:C.compliant}40`,color:b.penalty>0?C.atRisk:C.compliant,fontSize:10}}>{b.penType}</span>)}
+                      {td2(b.penalty>0?$usd(b.penalty):"$0",{textAlign:"right",fontWeight:800,color:b.penalty>0?C.nonCompliant:C.compliant,fontSize:13})}
+                      {td2(
+                        <div style={{display:"flex",alignItems:"center",gap:5}}>
+                          <div style={{flex:1,height:4,background:C.border,borderRadius:2,minWidth:50}}><div style={{height:4,borderRadius:2,width:`${b.impl}%`,background:b.impl>=75?C.compliant:b.impl>=50?C.atRisk:C.nonCompliant}}/></div>
+                          <span style={{fontSize:10,color:b.impl>=75?C.compliant:b.impl>=50?C.atRisk:C.nonCompliant,fontWeight:700}}>{b.impl}%</span>
+                        </div>
+                      ,{minWidth:100})}
+                      {td2($usd(b.capNeed),{textAlign:"right",color:C.muted})}
+                      {td2(<span style={sBadge(b.status)}>{b.status}</span>)}
+                    </tr>
+                    {isOpen&&(
+                      <tr key={`${b.id}-exp`} style={{borderBottom:`1px solid ${C.accent}40`}}>
+                        <td colSpan={9} style={{padding:"12px 14px",background:`${C.accent}08`}}>
+                          <div style={{display:"flex",gap:16,flexWrap:"wrap",marginBottom:10}}>
+                            {[
+                              {label:"Property Type",value:b.type},
+                              {label:"Gross SF",value:$n(b.sf)},
+                              {label:"Actual EUI",value:`${b.eui} kBtu/sqft`,color:b.eui>b.target?C.nonCompliant:C.compliant},
+                              {label:"BPS Target EUI",value:`${b.target} kBtu/sqft`,color:C.muted},
+                              {label:"EUI Gap",value:b.eui>b.target?`+${(b.eui-b.target).toFixed(1)} (${(((b.eui-b.target)/b.target)*100).toFixed(1)}% over)`:"On target",color:b.eui>b.target?C.nonCompliant:C.compliant},
+                              {label:"GHG Intensity",value:`${b.ghgInt} kg CO₂e/sqft`},
+                              {label:"ENERGY STAR",value:b.eStar,color:b.eStar>=75?C.compliant:b.eStar>=50?C.atRisk:C.nonCompliant},
+                              {label:"Cert.",value:b.cert||"None",color:b.cert&&b.cert!=="None"?C.teal:C.muted},
+                              {label:"Retro-Comm.",value:b.retro,color:b.retro==="Complete"?C.compliant:b.retro==="Not Started"?C.nonCompliant:C.atRisk},
+                              {label:"Decarb Pathway",value:b.decarb?"Yes":"No",color:b.decarb?C.compliant:C.muted},
+                              {label:"Incentive Potential",value:$usd(b.incentAmt),color:C.compliant},
+                              {label:"Net Exposure",value:$usd(Math.max(0,b.penalty-b.incentAmt)),color:b.penalty>b.incentAmt?C.nonCompliant:C.compliant},
+                            ].map(({label,value,color})=>(
+                              <div key={label} style={{minWidth:140}}>
+                                <div style={{fontSize:9,color:C.muted,textTransform:"uppercase",letterSpacing:".4px",marginBottom:2}}>{label}</div>
+                                <div style={{fontSize:12,fontWeight:600,color:color||C.bright}}>{value}</div>
+                              </div>
+                            ))}
+                          </div>
+                          <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
+                            <div style={{fontSize:10,color:C.muted}}>Deadlines:</div>
+                            {[{label:"Benchmark",date:b.benchDue},{label:"Audit",date:b.auditDue},{label:"BPS",date:b.bpsDue}].map(({label,date})=>{
+                              if(!date)return<span key={label} style={{fontSize:10,color:C.muted,padding:"2px 7px",borderRadius:4,background:C.card,border:`1px solid ${C.border}`}}>{label}: N/A</span>;
+                              const d=dF(date),u=urgency(d);
+                              return<span key={label} style={{fontSize:10,padding:"2px 7px",borderRadius:4,background:`${u.color}15`,border:`1px solid ${u.color}40`,color:u.color,fontWeight:600}}>{label}: {$dt(date)} · {u.label}</span>;
+                            })}
+                          </div>
+                        </td>
+                      </tr>
+                    )}
+                  </>
+                );
+              })}
+              <tr style={{background:`${C.accent}12`,borderTop:`2px solid ${C.accent}40`}}>
+                <td colSpan={5} style={{padding:"8px 10px",color:C.bright,fontWeight:800,fontSize:12}}>
+                  {penJurisF!=="all"||penStateF!=="all"||penTypeF!=="all"?"FILTERED TOTAL":"PORTFOLIO TOTAL"}
+                </td>
+                {td2($usd(filteredPenTotal),{textAlign:"right",fontWeight:800,color:C.nonCompliant,fontSize:14})}
+                {td2("—",{textAlign:"right"})}
+                {td2($usd(filteredCapTotal),{textAlign:"right",fontWeight:800,color:C.atRisk})}
+                <td/>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+        {/* Pagination */}
+        <div style={{display:"flex",gap:6,justifyContent:"space-between",alignItems:"center",marginTop:10}}>
+          <span style={{fontSize:10,color:C.muted}}>Showing {penPage*PEN_PAGE+1}–{Math.min((penPage+1)*PEN_PAGE,filteredPen.length)} of {filteredPen.length} buildings</span>
+          <div style={{display:"flex",gap:4}}>
+            {["«","‹","›","»"].map((lbl,i)=>{
+              const disabled=i<2?penPage===0:penPage===penTotalPages-1;
+              const action=i===0?()=>setPenPage(0):i===1?()=>setPenPage(p=>Math.max(0,p-1)):i===2?()=>setPenPage(p=>Math.min(penTotalPages-1,p+1)):()=>setPenPage(penTotalPages-1);
+              return<button key={lbl} onClick={action} disabled={disabled} style={{padding:"3px 9px",borderRadius:5,border:`1px solid ${C.border}`,background:C.card2,color:disabled?C.muted:C.bright,cursor:disabled?"not-allowed":"pointer",fontSize:11}}>{lbl}</button>;
+            })}
+          </div>
+        </div>
+      </Card>
+    </div>
+  );
+}
+
+function urgency(d){if(d==null)return{color:C.muted,label:"N/A"};if(d<0)return{color:C.nonCompliant,label:`${Math.abs(d)}d OVERDUE`};if(d<=30)return{color:C.nonCompliant,label:`${d}d`};if(d<=60)return{color:C.atRisk,label:`${d}d`};if(d<=90)return{color:"#eab308",label:`${d}d`};return{color:C.compliant,label:`${d}d`};}
+function sBadge(s){const oc=s==="Compliant"?C.compliant:s==="At-Risk"?C.atRisk:s==="Non-Compliant"?C.nonCompliant:C.muted;const ob=s==="Compliant"?"#052e16":s==="At-Risk"?"#3a1500":s==="Non-Compliant"?"#3a0000":"#0d1626";return{color:oc,background:ob,borderRadius:4,padding:"2px 7px",fontSize:10,fontWeight:700,display:"inline-block",border:`1px solid ${oc}40`,whiteSpace:"nowrap"};}
+const tt={contentStyle:{background:C.card2,border:`1px solid ${C.border}`,borderRadius:6,fontSize:12},labelStyle:{color:C.bright}};
+function Card({children,style}){return <div style={{background:C.card,border:`1px solid ${C.border}`,borderRadius:10,padding:16,...style}}>{children}</div>;}
+function KpiCard({label,value,sub,color}){return <Card style={{flex:"1 1 115px",minWidth:105}}><div style={{fontSize:10,color:C.muted,marginBottom:3,textTransform:"uppercase",letterSpacing:".5px"}}>{label}</div><div style={{fontSize:20,fontWeight:800,color:color||C.bright,lineHeight:1.1}}>{value}</div>{sub&&<div style={{fontSize:10,color:C.muted,marginTop:2}}>{sub}</div>}</Card>;}
+function Ring({pct,label,color}){const r=30,cx=41,cy=41,circ=2*Math.PI*r,dash=(pct/100)*circ;return <div style={{display:"flex",flexDirection:"column",alignItems:"center",gap:5}}><svg width={82} height={82} viewBox="0 0 82 82"><circle cx={cx} cy={cy} r={r} fill="none" stroke={C.border} strokeWidth={9}/><circle cx={cx} cy={cy} r={r} fill="none" stroke={color} strokeWidth={9} strokeDasharray={`${dash} ${circ}`} strokeLinecap="round" transform="rotate(-90 41 41)"/><text x={cx} y={cy+5} textAnchor="middle" fontSize={13} fontWeight="800" fill={C.bright}>{pct}%</text></svg><div style={{fontSize:10,color:C.muted,textAlign:"center",maxWidth:82,lineHeight:1.3}}>{label}</div></div>;}
+
+const PAGE_SIZE=25;
+
+export default function Dashboard(){
+  const [tab,setTab]=useState("overview");
+  const [search,setSearch]=useState("");
+  const [statusF,setStatusF]=useState("all");
+  const [typeF,setTypeF]=useState("all");
+  const [stateF,setStateF]=useState("all");
+  const [sortCol,setSortCol]=useState("name");
+  const [sortDir,setSortDir]=useState("asc");
+  const [page,setPage]=useState(0);
+  const [coverageModal,setCoverageModal]=useState(null);
+  const [coverageSort,setCoverageSort]=useState({});
+  const [kpiModal,setKpiModal]=useState(null);
+  const [kpiSort,setKpiSort]=useState({});
+
+  // Data Import state
+  const [importData,setImportData]=useState(null);
+  const [importPreview,setImportPreview]=useState([]);
+  const [importMode,setImportMode]=useState("merge");
+  const [importStatus,setImportStatus]=useState(null);
+  const [importHistory,setImportHistory]=useState([]);
+  const fileRef=useRef(null);
+
+  // Action Items state
+  const [actionItems,setActionItems]=useState(()=>{
+    // Seed some demo action items
+    const seeds=[];
+    ACTIVE.filter(b=>b.status==="Non-Compliant").slice(0,8).forEach((b,i)=>{
+      seeds.push({id:Date.now()+i,buildingId:b.id,building:b.name,title:`Schedule energy audit for ${b.name}`,priority:i<3?"high":"medium",status:"open",category:"Audit",dueDate:addD(14+i*7),created:addD(-10-i*3),assignee:["J. Martinez","S. Chen","A. Patel","R. Kim"][i%4],notes:""});
+    });
+    ACTIVE.filter(b=>b.status==="At-Risk").slice(0,5).forEach((b,i)=>{
+      seeds.push({id:Date.now()+100+i,buildingId:b.id,building:b.name,title:`Submit benchmarking report — ${b.name}`,priority:i<2?"high":"low",status:i<2?"in-progress":"open",category:"Benchmarking",dueDate:addD(30+i*14),created:addD(-5-i*2),assignee:["M. Johnson","L. Wang","D. Smith"][i%3],notes:""});
+    });
+    ACTIVE.filter(b=>b.bpsJuris&&b.penalty>0).slice(0,4).forEach((b,i)=>{
+      seeds.push({id:Date.now()+200+i,buildingId:b.id,building:b.name,title:`Apply for ${b.incentives[0]||"incentive program"}`,priority:"medium",status:i===0?"completed":"open",category:"Incentive",dueDate:addD(60+i*20),created:addD(-15),assignee:["J. Martinez","A. Patel"][i%2],notes:""});
+    });
+    return seeds;
+  });
+  const [actionFilter,setActionFilter]=useState({status:"all",priority:"all",category:"all",building:""});
+  const [newAction,setNewAction]=useState(null);
+  const [expandedAction,setExpandedAction]=useState(null);
+
+  // Notes state
+  const [buildingNotes,setBuildingNotes]=useState(()=>{
+    const seeds={};
+    [{bid:48,notes:[{id:1,text:"BERDO 2.0 compliance deadline approaching. Need to schedule retro-commissioning assessment.",tag:"Compliance",ts:addD(-12),author:"J. Martinez"},{id:2,text:"Received MassSave rebate pre-approval for $85K. Need to finalize scope of work.",tag:"Incentive",ts:addD(-5),author:"S. Chen"}]},{bid:50,notes:[{id:3,text:"LA EBO filing submitted. Awaiting confirmation from LADBS.",tag:"Filing",ts:addD(-8),author:"A. Patel"}]},{bid:89,notes:[{id:4,text:"Chicago EBO audit scheduled for April 15. Contractor confirmed.",tag:"Audit",ts:addD(-3),author:"R. Kim"}]},{bid:42,notes:[{id:5,text:"NJ benchmarking report completed and submitted via Portfolio Manager.",tag:"Benchmarking",ts:addD(-18),author:"M. Johnson"},{id:6,text:"Building envelope assessment identified significant air leakage. Recommend sealing by Q3.",tag:"Capital",ts:addD(-2),author:"L. Wang"}]}].forEach(({bid,notes})=>{seeds[bid]=notes;});
+    return seeds;
+  });
+  const [notesBldSearch,setNotesBldSearch]=useState("");
+  const [selectedNoteBld,setSelectedNoteBld]=useState(null);
+  const [newNoteText,setNewNoteText]=useState("");
+  const [newNoteTag,setNewNoteTag]=useState("General");
+  const [notesFilterTag,setNotesFilterTag]=useState("all");
+
+  // ENERGY STAR PM state
+  const [espmConnected,setEspmConnected]=useState(false);
+  const [espmApiKey,setEspmApiKey]=useState("");
+  const [espmSyncing,setEspmSyncing]=useState(false);
+  const [espmLastSync,setEspmLastSync]=useState(null);
+  const [espmScoreOverrides,setEspmScoreOverrides]=useState({});
+  const [espmSelectedBld,setEspmSelectedBld]=useState(null);
+  const [espmFilterScore,setEspmFilterScore]=useState("all");
+
+  const stats=useMemo(()=>{
+    const n=ACTIVE.length;
+    const comp=ACTIVE.filter(b=>b.status==="Compliant").length;
+    const ar=ACTIVE.filter(b=>b.status==="At-Risk").length;
+    const nc=ACTIVE.filter(b=>b.status==="Non-Compliant").length;
+    const totalPen=ACTIVE.reduce((a,b)=>a+b.penalty,0);
+    const totalCap=ACTIVE.reduce((a,b)=>a+b.capNeed,0);
+    const totalIncent=ACTIVE.reduce((a,b)=>a+b.incentAmt,0);
+    const totalSF=ACTIVE.reduce((a,b)=>a+b.sf,0);
+    const avgEui=(ACTIVE.reduce((a,b)=>a+(b.eui||0),0)/n).toFixed(1);
+    const avgTarget=(ACTIVE.reduce((a,b)=>a+(b.target||0),0)/n).toFixed(1);
+    const avgEStar=Math.round(ACTIVE.reduce((a,b)=>a+(b.eStar||0),0)/n);
+    const totalGhg=ACTIVE.reduce((a,b)=>a+b.s1+b.s2,0);
+    const pctBench=Math.round(ACTIVE.filter(b=>b.needsBench).length/n*100);
+    const pctAudit=Math.round(ACTIVE.filter(b=>b.needsAudit).length/n*100);
+    const pctBps=Math.round(ACTIVE.filter(b=>b.bpsJuris).length/n*100);
+    const pctCov=Math.round(ACTIVE.filter(b=>b.covered).length/n*100);
+    const pctDecarb=Math.round(ACTIVE.filter(b=>b.decarb).length/n*100);
+    const avgYoy=(ACTIVE.reduce((a,b)=>a+(b.yoyEui||0),0)/n).toFixed(1);
+    const deadlines=ACTIVE.flatMap(b=>[
+      b.benchDue&&{bld:b.name,type:"Benchmark",date:b.benchDue,days:dF(b.benchDue)},
+      b.auditDue&&{bld:b.name,type:"Audit",date:b.auditDue,days:dF(b.auditDue)},
+      b.bpsDue&&{bld:b.name,type:"BPS Filing",date:b.bpsDue,days:dF(b.bpsDue)},
+    ]).filter(Boolean).sort((a,b2)=>a.days-b2.days);
+    const bpsGapBuildings=ACTIVE.filter(b=>b.bpsJuris&&b.eui>b.target);
+    const bpsGaps=bpsGapBuildings.length;
+    const missingFilingBuildings=ACTIVE.filter(b=>[b.benchDue,b.auditDue,b.bpsDue].some(d=>d&&dF(d)<0));
+    const missingFilings=missingFilingBuildings.length;
+    return{n,comp,ar,nc,totalPen,totalCap,totalIncent,totalSF,avgEui,avgTarget,avgEStar,totalGhg,pctBench,pctAudit,pctBps,pctCov,pctDecarb,avgYoy,bpsGaps,bpsGapBuildings,missingFilings,missingFilingBuildings,deadlines};
+  },[]);
+
+  const filtered=useMemo(()=>{
+    let arr=[...BUILDINGS];
+    if(search) arr=arr.filter(b=>b.name.toLowerCase().includes(search.toLowerCase())||b.city.toLowerCase().includes(search.toLowerCase()));
+    if(statusF!=="all") arr=arr.filter(b=>b.status===statusF);
+    if(typeF!=="all") arr=arr.filter(b=>b.type===typeF);
+    if(stateF!=="all") arr=arr.filter(b=>b.state===stateF);
+    arr.sort((a,b2)=>{
+      let av=a[sortCol],bv=b2[sortCol];
+      if(typeof av==="string"){av=av.toLowerCase();bv=(bv||"").toLowerCase();}
+      if(av==null)return 1;if(bv==null)return -1;
+      return sortDir==="asc"?(av>bv?1:-1):(av<bv?1:-1);
+    });
+    return arr;
+  },[search,statusF,typeF,stateF,sortCol,sortDir]);
+
+  const paged=filtered.slice(page*PAGE_SIZE,(page+1)*PAGE_SIZE);
+  const totalPages=Math.ceil(filtered.length/PAGE_SIZE);
+
+  const allTypes=[...new Set(BUILDINGS.map(b=>b.type))].sort();
+  const allStates=[...new Set(BUILDINGS.map(b=>b.state))].sort();
+
+  const pieDat=[{name:"Compliant",value:stats.comp,color:C.compliant},{name:"At-Risk",value:stats.ar,color:C.atRisk},{name:"Non-Compliant",value:stats.nc,color:C.nonCompliant}];
+  const euiSample=ACTIVE.slice(0,18).map(b=>({name:b.name.split(" ").slice(0,2).join(" "),actual:b.eui,target:b.target,over:b.eui>b.target}));
+  const scopeSample=ACTIVE.slice(0,16).map(b=>({name:b.name.split(" ")[0],"Scope 1":b.s1,"Scope 2":b.s2}));
+  const incentVsPen=[...ACTIVE].sort((a,b)=>b.incentAmt-a.incentAmt).slice(0,18).map(b=>({name:b.name.split(" ")[0],Incentives:b.incentAmt,Penalties:b.penalty}));
+
+  const bandDefs=[{label:"Overdue",color:C.nonCompliant,fn:d=>d<0},{label:"≤ 30 Days",color:C.nonCompliant,fn:d=>d>=0&&d<=30},{label:"31–60 Days",color:C.atRisk,fn:d=>d>30&&d<=60},{label:"61–90 Days",color:"#eab308",fn:d=>d>60&&d<=90},{label:"90+ Days",color:C.compliant,fn:d=>d>90}];
+
+  const nav=[{id:"overview",icon:"◈",label:"Overview"},{id:"analytics",icon:"↗",label:"Analytics"},{id:"buildings",icon:"⊞",label:"Buildings"},{id:"compliance",icon:"⚠",label:"Compliance"},{id:"incentives",icon:"✦",label:"Incentives"},{id:"import",icon:"↥",label:"Data Import"},{id:"actions",icon:"☐",label:"Action Items"},{id:"map",icon:"◎",label:"Jurisdiction Map"},{id:"notes",icon:"✎",label:"Notes"},{id:"energystar",icon:"★",label:"ENERGY STAR PM"}];
+
+  // Data Import handlers
+  const handleFileUpload=useCallback((e)=>{
+    const file=e.target.files[0];
+    if(!file)return;
+    const reader=new FileReader();
+    reader.onload=(ev)=>{
+      try{
+        const text=ev.target.result;
+        let parsed=[];
+        if(file.name.endsWith(".json")){
+          const json=JSON.parse(text);
+          parsed=Array.isArray(json)?json:json.buildings||json.data||[];
+        }else{
+          const lines=text.split("\n").filter(l=>l.trim());
+          if(lines.length<2){setImportStatus({type:"error",msg:"CSV must have a header row and at least one data row."});return;}
+          const headers=lines[0].split(",").map(h=>h.trim().toLowerCase().replace(/[^a-z0-9]/g,""));
+          parsed=lines.slice(1).map(line=>{
+            const vals=line.split(",").map(v=>v.trim());
+            const obj={};
+            headers.forEach((h,i)=>{obj[h]=vals[i]||"";});
+            return obj;
+          });
+        }
+        setImportPreview(parsed.slice(0,20));
+        setImportData(parsed);
+        setImportStatus({type:"success",msg:`Parsed ${parsed.length} records from ${file.name}`});
+      }catch(err){setImportStatus({type:"error",msg:`Parse error: ${err.message}`});}
+    };
+    reader.readAsText(file);
+  },[]);
+
+  const confirmImport=useCallback(()=>{
+    if(!importData||!importData.length)return;
+    const ts=new Date().toISOString();
+    setImportHistory(h=>[{date:ts,file:`${importData.length} records`,mode:importMode,count:importData.length},...h]);
+    setImportStatus({type:"success",msg:`${importMode==="merge"?"Merged":"Replaced"} ${importData.length} records successfully. (Demo mode — data shown in preview only)`});
+    setImportData(null);
+    setImportPreview([]);
+  },[importData,importMode]);
+
+  // Action Item helpers
+  const addActionItem=(item)=>{
+    setActionItems(prev=>[{...item,id:Date.now(),created:NOW.toISOString().split("T")[0],status:"open"},...prev]);
+    setNewAction(null);
+  };
+  const updateActionItem=(id,updates)=>{
+    setActionItems(prev=>prev.map(a=>a.id===id?{...a,...updates}:a));
+  };
+  const deleteActionItem=(id)=>{
+    setActionItems(prev=>prev.filter(a=>a.id!==id));
+  };
+
+  // Notes helpers
+  const addNote=(bldId)=>{
+    if(!newNoteText.trim())return;
+    setBuildingNotes(prev=>({...prev,[bldId]:[{id:Date.now(),text:newNoteText.trim(),tag:newNoteTag,ts:NOW.toISOString().split("T")[0],author:"Current User"},...(prev[bldId]||[])]}));
+    setNewNoteText("");
+  };
+  const deleteNote=(bldId,noteId)=>{
+    setBuildingNotes(prev=>({...prev,[bldId]:(prev[bldId]||[]).filter(n=>n.id!==noteId)}));
+  };
+
+  // ENERGY STAR PM helpers
+  const espmSimulateSync=()=>{
+    setEspmSyncing(true);
+    setTimeout(()=>{
+      const overrides={};
+      ACTIVE.forEach(b=>{
+        const drift=Math.round((hv(b.id*7)-0.5)*12);
+        overrides[b.id]={pmScore:Math.max(1,Math.min(99,b.eStar+drift)),lastSync:NOW.toISOString().split("T")[0],propertyId:100000+b.id,status:"synced"};
+      });
+      setEspmScoreOverrides(overrides);
+      setEspmSyncing(false);
+      setEspmLastSync(NOW.toISOString().split("T")[0]);
+      setEspmConnected(true);
+    },1500);
+  };
+
+  // US state paths for the jurisdiction map (simplified)
+  const US_STATES={AL:"M575,440 L570,490 L615,495 L618,440Z",AZ:"M175,390 L160,480 L235,490 L250,385Z",CA:"M90,260 L70,420 L145,450 L155,280Z",CO:"M250,300 L245,370 L330,375 L335,305Z",CT:"M785,210 L775,225 L795,230 L800,215Z",DC:"M725,305 L720,315 L730,318 L733,308Z",DE:"M740,295 L735,315 L750,318 L752,298Z",FL:"M620,470 L600,540 L675,545 L700,480Z",GA:"M620,400 L610,460 L665,465 L670,405Z",HI:"M270,530 L260,555 L295,558 L300,535Z",IL:"M535,250 L525,350 L565,355 L572,255Z",IN:"M575,260 L568,340 L605,345 L610,265Z",MA:"M790,190 L780,210 L810,215 L815,195Z",MD:"M700,295 L690,320 L735,325 L740,300Z",MN:"M460,130 L450,230 L510,235 L515,135Z",NC:"M630,370 L620,400 L720,405 L725,375Z",NJ:"M755,240 L745,290 L770,295 L775,245Z",NV:"M140,250 L130,380 L190,385 L200,255Z",NY:"M710,160 L700,235 L770,240 L775,165Z",OH:"M610,245 L600,315 L650,320 L655,250Z",OR:"M90,160 L80,240 L160,245 L165,165Z",PA:"M680,230 L670,290 L740,295 L745,235Z",TN:"M560,370 L550,400 L640,405 L645,375Z",TX:"M320,400 L300,530 L440,540 L450,410Z",VA:"M670,320 L660,370 L740,375 L745,325Z",WA:"M100,100 L90,170 L170,175 L175,105Z"};
+
+  function sortTh(col){if(sortCol===col)setSortDir(d=>d==="asc"?"desc":"asc");else{setSortCol(col);setSortDir("asc");}setPage(0);}
+  const th=(col,label)=>(
+    <th onClick={()=>sortTh(col)} style={{padding:"9px 10px",textAlign:"left",fontSize:10,color:sortCol===col?C.accent:C.muted,fontWeight:600,whiteSpace:"nowrap",cursor:"pointer",borderBottom:`1px solid ${C.border}`,background:sortCol===col?`${C.accent}18`:C.card2,userSelect:"none"}}>
+      {label}{sortCol===col?(sortDir==="asc"?" ↑":" ↓"):""}
+    </th>
+  );
+  const td=(content,extra={})=><td style={{padding:"7px 10px",fontSize:12,...extra}}>{content}</td>;
+
+  return (
+    <div style={{display:"flex",minHeight:"100vh",background:C.bg,color:C.text,fontFamily:"'Inter',system-ui,sans-serif",fontSize:13}}>
+      {/* Sidebar */}
+      <div style={{width:180,background:C.card,borderRight:`1px solid ${C.border}`,display:"flex",flexDirection:"column",flexShrink:0,position:"sticky",top:0,height:"100vh",overflow:"hidden"}}>
+        <div style={{padding:"16px 14px 12px",borderBottom:`1px solid ${C.border}`}}>
+          <div style={{fontSize:15,fontWeight:800,color:C.bright}}>PortfolioIQ</div>
+          <div style={{fontSize:10,color:C.muted,marginTop:1}}>BPS & Compliance</div>
+        </div>
+        <div style={{padding:"6px 0",flex:1}}>
+          {nav.map(n=>(
+            <button key={n.id} onClick={()=>setTab(n.id)} style={{display:"flex",alignItems:"center",gap:8,width:"100%",textAlign:"left",padding:"10px 14px",background:tab===n.id?`${C.accent}18`:"transparent",color:tab===n.id?C.accent:C.muted,border:"none",cursor:"pointer",borderLeft:`3px solid ${tab===n.id?C.accent:"transparent"}`,fontSize:13,fontWeight:tab===n.id?600:400}}>
+              <span style={{fontSize:13}}>{n.icon}</span>{n.label}
+            </button>
+          ))}
+        </div>
+        <div style={{padding:"10px 14px",borderTop:`1px solid ${C.border}`}}>
+          <div style={{fontSize:10,color:C.muted}}>{BUILDINGS.length} Assets · {allStates.length} States</div>
+          <div style={{fontSize:10,color:C.muted,marginTop:1}}>Mar 12, 2026</div>
+        </div>
+      </div>
+
+      {/* Main */}
+      <div style={{flex:1,overflow:"auto",padding:"18px 20px 32px"}}>
+        <div style={{marginBottom:14}}>
+          <h1 style={{margin:0,fontSize:18,fontWeight:800,color:C.bright}}>{nav.find(n=>n.id===tab)?.label}</h1>
+          <div style={{fontSize:11,color:C.muted,marginTop:2}}>Commercial Real Estate Portfolio · Benchmarking, Audit & BPS Dashboard</div>
+        </div>
+
+        {/* OVERVIEW */}
+        {tab==="overview" && (
+          <div style={{display:"flex",flexDirection:"column",gap:12}}>
+            <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
+              <KpiCard label="Total Assets" value={BUILDINGS.length} sub={`${stats.n} active buildings`} color={C.blue}/>
+              <KpiCard label="Total Portfolio SF" value={`${(stats.totalSF/1000000).toFixed(1)}M`} sub="Gross floor area" color={C.cyan}/>
+              <KpiCard label="Compliant" value={stats.comp} sub={`${Math.round(stats.comp/stats.n*100)}% of active`} color={C.compliant}/>
+              <KpiCard label="At-Risk" value={stats.ar} sub={`${Math.round(stats.ar/stats.n*100)}%`} color={C.atRisk}/>
+              <KpiCard label="Non-Compliant" value={stats.nc} sub={`${Math.round(stats.nc/stats.n*100)}%`} color={C.nonCompliant}/>
+              <KpiCard label="Avg EUI" value={stats.avgEui} sub={`Target: ${stats.avgTarget} kBtu/sqft`} color={C.cyan}/>
+              <KpiCard label="Total Penalties" value={$usd(stats.totalPen)} sub="Current exposure" color={C.nonCompliant}/>
+              <KpiCard label="Capital Needed" value={`$${(stats.totalCap/1000000).toFixed(0)}M`} sub="For compliance" color={C.atRisk}/>
+              <KpiCard label="Incentive Potential" value={`$${(stats.totalIncent/1000000).toFixed(0)}M`} sub="Available" color={C.compliant}/>
+            </div>
+
+            <Card>
+              <div style={{fontSize:13,fontWeight:700,color:C.bright,marginBottom:4}}>Portfolio Coverage Breakdown</div>
+              <div style={{fontSize:10,color:C.muted,marginBottom:12}}>Click any ring to explore the underlying buildings</div>
+              <div style={{display:"flex",gap:20,justifyContent:"space-around",flexWrap:"wrap"}}>
+                {[
+                  {key:"bench",pct:stats.pctBench,label:"Requires Benchmarking",color:C.blue,filter:b=>b.needsBench,desc:"Buildings ≥10,000 SF required to benchmark energy use annually."},
+                  {key:"audit",pct:stats.pctAudit,label:"Requires Audit",color:C.purple,filter:b=>b.needsAudit,desc:"Covered buildings required to conduct periodic energy audits."},
+                  {key:"bps",pct:stats.pctBps,label:"In BPS Jurisdiction",color:C.cyan,filter:b=>b.bpsJuris,desc:"Buildings subject to a Building Performance Standard law or ordinance."},
+                  {key:"cov",pct:stats.pctCov,label:"Covered Buildings",color:C.accent,filter:b=>b.covered,desc:"Buildings ≥25,000 SF classified as 'covered' under applicable regulations."},
+                  {key:"decarb",pct:stats.pctDecarb,label:"On Decarb Pathway",color:C.compliant,filter:b=>b.decarb,desc:"Buildings actively pursuing a decarbonization plan or pathway."},
+                ].map(({key,pct,label,color,filter,desc})=>(
+                  <div key={key} onClick={()=>setCoverageModal(coverageModal===key?null:key)}
+                    style={{display:"flex",flexDirection:"column",alignItems:"center",gap:5,cursor:"pointer",padding:"8px 10px",borderRadius:10,transition:"background .15s",background:coverageModal===key?`${color}18`:"transparent",border:`1px solid ${coverageModal===key?color:C.border}`,outline:"none"}}>
+                    <Ring pct={pct} label={label} color={color}/>
+                    <div style={{fontSize:10,color:coverageModal===key?color:C.muted,fontWeight:coverageModal===key?700:400}}>{coverageModal===key?"▲ Hide":"▼ Show"} buildings</div>
+                  </div>
+                ))}
+              </div>
+
+              {/* Drill-down panel */}
+              {coverageModal && (()=>{
+                const cfg={
+                  bench:{label:"Requires Benchmarking",color:C.blue,filter:b=>b.needsBench,desc:"Buildings legally required to benchmark energy use annually based on jurisdiction and SF threshold."},
+                  audit:{label:"Requires Audit",color:C.purple,filter:b=>b.needsAudit,desc:"Buildings legally required to conduct periodic energy audits based on jurisdiction and SF threshold."},
+                  bps:{label:"In BPS Jurisdiction",color:C.cyan,filter:b=>b.bpsJuris,desc:"Buildings subject to a Building Performance Standard law or ordinance."},
+                  cov:{label:"Covered Buildings",color:C.accent,filter:b=>b.covered,desc:"Buildings legally classified as 'covered' under applicable BPS regulations based on jurisdiction and SF threshold."},
+                  decarb:{label:"On Decarb Pathway",color:C.compliant,filter:b=>b.decarb,desc:"Buildings actively pursuing a decarbonization plan or pathway."},
+                }[coverageModal];
+                const cs=coverageSort[coverageModal]||{col:"sf",dir:"desc"};
+                function sortCov(col){setCoverageSort(p=>{const cur=p[coverageModal]||{};return{...p,[coverageModal]:{col,dir:cur.col===col?(cur.dir==="asc"?"desc":"asc"):"desc"}};});}
+                function cvTh(col,label,align){
+                  const active=cs.col===col;
+                  return <th key={col} onClick={()=>sortCov(col)} style={{padding:"7px 10px",textAlign:align||"left",fontSize:10,color:active?cfg.color:C.muted,fontWeight:600,whiteSpace:"nowrap",cursor:"pointer",borderBottom:`1px solid ${C.border}`,background:active?`${cfg.color}18`:C.card2,userSelect:"none",position:"sticky",top:0}}>{label}{active?(cs.dir==="asc"?" ↑":" ↓"):""}</th>;
+                }
+                const baseRows=ACTIVE.filter(cfg.filter);
+                const rows=[...baseRows].sort((a,b2)=>{
+                  let av=a[cs.col],bv=b2[cs.col];
+                  if(typeof av==="string"){av=(av||"").toLowerCase();bv=(bv||"").toLowerCase();}
+                  if(av==null)return 1;if(bv==null)return -1;
+                  return cs.dir==="asc"?(av>bv?1:-1):(av<bv?1:-1);
+                });
+                const stateBreakdown=[...new Set(baseRows.map(b=>b.state))].sort().map(st=>({st,count:baseRows.filter(b=>b.state===st).length})).sort((a,b)=>b.count-a.count);
+                return(
+                  <div style={{marginTop:16,borderTop:`1px solid ${cfg.color}40`,paddingTop:14}}>
+                    <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:10,flexWrap:"wrap",gap:8}}>
+                      <div>
+                        <div style={{fontSize:13,fontWeight:700,color:cfg.color}}>{cfg.label} — {rows.length} Buildings</div>
+                        <div style={{fontSize:11,color:C.muted,marginTop:2}}>{cfg.desc}</div>
+                      </div>
+                      <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
+                        {stateBreakdown.slice(0,8).map(({st,count})=>(
+                          <div key={st} style={{padding:"3px 9px",borderRadius:12,background:`${cfg.color}18`,border:`1px solid ${cfg.color}40`,fontSize:10,color:cfg.color,fontWeight:600}}>{st}: {count}</div>
+                        ))}
+                      </div>
+                    </div>
+                    <div style={{overflowX:"auto",maxHeight:320,overflowY:"auto"}}>
+                      <table style={{width:"100%",borderCollapse:"collapse",fontSize:11}}>
+                        <thead>
+                          <tr>
+                            {[["name","Building"],["city","City"],["state","ST"],["type","Type"],["sf","SF","right"],["status","Status"],["eui","EUI","right"],["target","Target","right"],["eStar","E★","right"],["juris","Juris"],["penalty","Penalty","right"]].map(([col,label,align])=>cvTh(col,label,align))}
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {rows.map((b,i)=>(
+                            <tr key={b.id} style={{borderBottom:`1px solid ${C.border}`,background:i%2===0?"transparent":C.card2}}>
+                              <td style={{padding:"6px 10px",color:C.bright,fontWeight:600,whiteSpace:"nowrap",maxWidth:160,overflow:"hidden",textOverflow:"ellipsis"}}>{b.name}</td>
+                              <td style={{padding:"6px 10px",color:C.muted,whiteSpace:"nowrap"}}>{b.city}</td>
+                              <td style={{padding:"6px 10px",color:C.muted}}>{b.state}</td>
+                              <td style={{padding:"6px 10px",color:C.muted,whiteSpace:"nowrap"}}>{b.type}</td>
+                              <td style={{padding:"6px 10px",color:C.muted,textAlign:"right"}}>{$n(b.sf)}</td>
+                              <td style={{padding:"6px 10px"}}><span style={sBadge(b.status)}>{b.status}</span></td>
+                              <td style={{padding:"6px 10px",textAlign:"right",fontWeight:700,color:b.eui&&b.target?(b.eui>b.target?(b.eui-b.target>b.target*0.2?C.nonCompliant:C.atRisk):C.compliant):C.muted}}>{b.eui??"—"}</td>
+                              <td style={{padding:"6px 10px",textAlign:"right",color:C.muted}}>{b.target??"—"}</td>
+                              <td style={{padding:"6px 10px",textAlign:"right",fontWeight:700,color:b.eStar?(b.eStar>=75?C.compliant:b.eStar>=50?C.atRisk:C.nonCompliant):C.muted}}>{b.eStar??"—"}</td>
+                              <td style={{padding:"6px 10px",color:b.juris&&b.juris!=="N/A"?C.cyan:C.muted,fontSize:10,whiteSpace:"nowrap"}}>{b.juris}</td>
+                              <td style={{padding:"6px 10px",textAlign:"right",fontWeight:700,color:b.penalty>0?C.nonCompliant:C.compliant}}>{b.penalty>0?$usd(b.penalty):"—"}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                    <div style={{marginTop:8,fontSize:10,color:C.muted,textAlign:"right"}}>{rows.length} buildings · {$n(rows.reduce((a,b)=>a+b.sf,0))} total SF · {$usd(rows.reduce((a,b)=>a+b.penalty,0))} total penalty exposure</div>
+                  </div>
+                );
+              })()}
+            </Card>
+
+            <div style={{display:"flex",gap:12,flexWrap:"wrap"}}>
+              <Card style={{flex:"1 1 200px"}}>
+                <div style={{fontSize:13,fontWeight:700,color:C.bright,marginBottom:6}}>BPS Compliance Status</div>
+                <div style={{display:"flex",alignItems:"center",gap:10}}>
+                  <ResponsiveContainer width={140} height={140}>
+                    <PieChart><Pie data={pieDat} cx={65} cy={65} innerRadius={38} outerRadius={60} dataKey="value" stroke="none">
+                      {pieDat.map((e,i)=><Cell key={i} fill={e.color}/>)}
+                    </Pie><Tooltip {...tt} formatter={(v,n)=>[v+" bldgs",n]}/></PieChart>
+                  </ResponsiveContainer>
+                  <div style={{display:"flex",flexDirection:"column",gap:8}}>
+                    {pieDat.map(d=>(
+                      <div key={d.name} style={{display:"flex",alignItems:"center",gap:6}}>
+                        <div style={{width:9,height:9,borderRadius:2,background:d.color,flexShrink:0}}/>
+                        <span style={{color:C.muted,fontSize:11}}>{d.name}</span>
+                        <span style={{color:C.bright,fontWeight:700,marginLeft:"auto",paddingLeft:8}}>{d.value}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </Card>
+              <Card style={{flex:"3 1 380px"}}>
+                <div style={{fontSize:13,fontWeight:700,color:C.bright,marginBottom:6}}>EUI vs BPS Target — Sample Buildings (kBtu/sqft/yr)</div>
+                <ResponsiveContainer width="100%" height={170}>
+                  <BarChart data={euiSample} margin={{top:0,right:5,bottom:24,left:-10}}>
+                    <CartesianGrid strokeDasharray="3 3" stroke={C.border}/>
+                    <XAxis dataKey="name" tick={{fill:C.muted,fontSize:8}} angle={-35} textAnchor="end" interval={0}/>
+                    <YAxis tick={{fill:C.muted,fontSize:10}}/>
+                    <Tooltip {...tt}/>
+                    <Bar dataKey="target" name="Target" fill={`${C.compliant}30`} radius={[2,2,0,0]}/>
+                    <Bar dataKey="actual" name="Actual EUI" radius={[3,3,0,0]}>
+                      {euiSample.map((e,i)=><Cell key={i} fill={e.over?(e.actual-e.target>e.target*0.2?C.nonCompliant:C.atRisk):C.compliant}/>)}
+                    </Bar>
+                    <Legend wrapperStyle={{fontSize:11,color:C.muted}}/>
+                  </BarChart>
+                </ResponsiveContainer>
+              </Card>
+            </div>
+
+            {/* Bottom interactive KPI row */}
+            <div style={{display:"flex",flexDirection:"column",gap:10}}>
+              <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
+                <KpiCard label="Avg YoY EUI" value={`${stats.avgYoy}%`} sub="Year-over-year" color={Number(stats.avgYoy)<0?C.compliant:C.nonCompliant}/>
+                {[
+                  {key:"ghg",label:"Total Portfolio GHG",value:$n(stats.totalGhg),sub:"mtCO₂e (Sc.1+2)",color:C.cyan},
+                  {key:"estar",label:"Avg ENERGY STAR",value:stats.avgEStar,sub:"Portfolio average",color:C.purple},
+                  {key:"bpsGaps",label:"BPS Performance Gaps",value:stats.bpsGaps,sub:`Buildings over EUI target in BPS jurisdictions`,color:C.atRisk},
+                  {key:"filings",label:"Missing Filings",value:stats.missingFilings,sub:"Buildings w/ overdue deadlines",color:C.nonCompliant},
+                  {key:"overdue",label:"Overdue Deadlines",value:stats.deadlines.filter(d=>d.days<0).length,sub:"Need immediate action",color:C.nonCompliant},
+                  {key:"next",label:"Next Deadline",value:stats.deadlines[0]?urgency(stats.deadlines[0].days).label:"—",sub:stats.deadlines[0]?.bld||"",color:urgency(stats.deadlines[0]?.days).color},
+                ].map(({key,label,value,sub,color})=>(
+                  <div key={key} onClick={()=>setKpiModal(kpiModal===key?null:key)} style={{flex:"1 1 115px",minWidth:105,cursor:"pointer"}}>
+                    <Card style={{border:`1px solid ${kpiModal===key?color:C.border}`,background:kpiModal===key?`${color}12`:C.card,transition:"all .15s"}}>
+                      <div style={{fontSize:10,color:C.muted,marginBottom:3,textTransform:"uppercase",letterSpacing:".5px"}}>{label}</div>
+                      <div style={{fontSize:20,fontWeight:800,color:color,lineHeight:1.1}}>{value}</div>
+                      <div style={{fontSize:10,color:C.muted,marginTop:2}}>{sub}</div>
+                      <div style={{fontSize:9,color:kpiModal===key?color:C.muted,marginTop:4,fontWeight:kpiModal===key?700:400}}>{kpiModal===key?"▲ Hide":"▼ Explore"}</div>
+                    </Card>
+                  </div>
+                ))}
+              </div>
+
+              {/* KPI drill-down panel */}
+              {kpiModal&&(()=>{
+                const ks=kpiSort[kpiModal]||{};
+                function srt(rows,dc,dd="desc"){
+                  const col=ks.col||dc,dir=ks.dir||dd;
+                  return [...rows].sort((a,b2)=>{
+                    let av=a[col],bv=b2[col];
+                    if(typeof av==="string"){av=(av||"").toLowerCase();bv=(bv||"").toLowerCase();}
+                    if(av==null)return 1;if(bv==null)return -1;
+                    return dir==="asc"?(av>bv?1:-1):(av<bv?1:-1);
+                  });
+                }
+                function kth(col,label,align){
+                  const active=ks.col===col;
+                  return <th key={col} onClick={()=>setKpiSort(p=>{const cur=p[kpiModal]||{};return{...p,[kpiModal]:{col,dir:cur.col===col?(cur.dir==="asc"?"desc":"asc"):"desc"}};})} style={{padding:"7px 10px",textAlign:align||"left",fontSize:10,color:active?C.accent:C.muted,fontWeight:600,whiteSpace:"nowrap",cursor:"pointer",borderBottom:`1px solid ${C.border}`,background:active?`${C.accent}18`:C.card2,userSelect:"none",position:"sticky",top:0}}>{label}{active?(ks.dir==="asc"?" ↑":" ↓"):""}</th>;
+                }
+
+                // GHG
+                if(kpiModal==="ghg"){
+                  const rows=srt(ACTIVE.map(b=>({...b,totalGhg:b.s1+b.s2})),"totalGhg");
+                  return(
+                    <Card style={{borderTop:`2px solid ${C.cyan}`}}>
+                      <div style={{fontSize:13,fontWeight:700,color:C.cyan,marginBottom:4}}>Total Portfolio GHG Emissions — {rows.length} Buildings</div>
+                      <div style={{fontSize:11,color:C.muted,marginBottom:10}}>Scope 1 (direct) + Scope 2 (electricity) emissions in mtCO₂e/yr. Click any column header to sort.</div>
+                      <div style={{overflowX:"auto",maxHeight:320,overflowY:"auto"}}>
+                        <table style={{width:"100%",borderCollapse:"collapse",fontSize:11}}>
+                          <thead><tr>{[["name","Building"],["city","City"],["state","ST"],["type","Type"],["sf","SF","right"],["s1","Scope 1","right"],["s2","Scope 2","right"],["totalGhg","Total GHG","right"],["ghgInt","GHG Int.","right"],["status","Status"]].map(([col,label,align])=>kth(col,label,align))}</tr></thead>
+                          <tbody>
+                            {rows.map((b,i)=>{const tot=b.totalGhg;return(
+                              <tr key={b.id} style={{borderBottom:`1px solid ${C.border}`,background:i%2===0?"transparent":C.card2}}>
+                                <td style={{padding:"6px 10px",color:C.bright,fontWeight:600,whiteSpace:"nowrap"}}>{b.name}</td>
+                                <td style={{padding:"6px 10px",color:C.muted}}>{b.city}</td>
+                                <td style={{padding:"6px 10px",color:C.muted}}>{b.state}</td>
+                                <td style={{padding:"6px 10px",color:C.muted,whiteSpace:"nowrap"}}>{b.type}</td>
+                                <td style={{padding:"6px 10px",color:C.muted,textAlign:"right"}}>{$n(b.sf)}</td>
+                                <td style={{padding:"6px 10px",color:C.orange,textAlign:"right",fontWeight:600}}>{$n(b.s1)}</td>
+                                <td style={{padding:"6px 10px",color:C.accent,textAlign:"right",fontWeight:600}}>{$n(b.s2)}</td>
+                                <td style={{padding:"6px 10px",color:C.cyan,textAlign:"right",fontWeight:800}}>{$n(tot)}</td>
+                                <td style={{padding:"6px 10px",textAlign:"right",color:b.ghgInt>10?C.nonCompliant:b.ghgInt>7?C.atRisk:C.compliant,fontWeight:600}}>{b.ghgInt}</td>
+                                <td style={{padding:"6px 10px"}}><span style={sBadge(b.status)}>{b.status}</span></td>
+                              </tr>
+                            );})}
+                          </tbody>
+                        </table>
+                      </div>
+                      <div style={{marginTop:8,fontSize:10,color:C.muted,textAlign:"right"}}>Portfolio total: <span style={{color:C.cyan,fontWeight:700}}>{$n(stats.totalGhg)} mtCO₂e</span> · Scope 1: {$n(ACTIVE.reduce((a,b)=>a+b.s1,0))} · Scope 2: {$n(ACTIVE.reduce((a,b)=>a+b.s2,0))}</div>
+                    </Card>
+                  );
+                }
+
+                // ENERGY STAR
+                if(kpiModal==="estar"){
+                  const rows=srt(ACTIVE.filter(b=>b.eStar!=null),"eStar","asc");
+                  const bands=[{label:"Poor (1–49)",color:C.nonCompliant,fn:b=>b.eStar<50},{label:"Fair (50–74)",color:C.atRisk,fn:b=>b.eStar>=50&&b.eStar<75},{label:"Good (75–99)",color:C.compliant,fn:b=>b.eStar>=75}];
+                  return(
+                    <Card style={{borderTop:`2px solid ${C.purple}`}}>
+                      <div style={{fontSize:13,fontWeight:700,color:C.purple,marginBottom:4}}>ENERGY STAR Scores — {rows.length} Buildings</div>
+                      <div style={{fontSize:11,color:C.muted,marginBottom:10}}>Scores ≥75 qualify for ENERGY STAR certification. Click any column header to sort.</div>
+                      <div style={{display:"flex",gap:10,marginBottom:12,flexWrap:"wrap"}}>
+                        {bands.map(bd=><div key={bd.label} style={{padding:"5px 12px",borderRadius:8,background:`${bd.color}18`,border:`1px solid ${bd.color}40`,fontSize:11,color:bd.color,fontWeight:600}}>{bd.label}: {rows.filter(bd.fn).length} bldgs</div>)}
+                      </div>
+                      <div style={{overflowX:"auto",maxHeight:320,overflowY:"auto"}}>
+                        <table style={{width:"100%",borderCollapse:"collapse",fontSize:11}}>
+                          <thead><tr>{[["name","Building"],["city","City"],["state","ST"],["type","Type"],["sf","SF","right"],["eStar","E★ Score","right"],["eui","EUI","right"],["status","Status"]].map(([col,label,align])=>kth(col,label,align))}</tr></thead>
+                          <tbody>
+                            {rows.map((b,i)=>{const sc=b.eStar>=75?C.compliant:b.eStar>=50?C.atRisk:C.nonCompliant;return(
+                              <tr key={b.id} style={{borderBottom:`1px solid ${C.border}`,background:i%2===0?"transparent":C.card2}}>
+                                <td style={{padding:"6px 10px",color:C.bright,fontWeight:600,whiteSpace:"nowrap"}}>{b.name}</td>
+                                <td style={{padding:"6px 10px",color:C.muted}}>{b.city}</td>
+                                <td style={{padding:"6px 10px",color:C.muted}}>{b.state}</td>
+                                <td style={{padding:"6px 10px",color:C.muted,whiteSpace:"nowrap"}}>{b.type}</td>
+                                <td style={{padding:"6px 10px",color:C.muted,textAlign:"right"}}>{$n(b.sf)}</td>
+                                <td style={{padding:"6px 10px",textAlign:"right"}}>
+                                  <div style={{display:"flex",alignItems:"center",gap:6,justifyContent:"flex-end"}}>
+                                    <div style={{width:60,height:5,background:C.border,borderRadius:3}}><div style={{height:5,borderRadius:3,width:`${b.eStar}%`,background:sc}}/></div>
+                                    <span style={{fontWeight:800,color:sc,fontSize:13,minWidth:24}}>{b.eStar}</span>
+                                  </div>
+                                </td>
+                                <td style={{padding:"6px 10px",textAlign:"right",color:b.eui>b.target?C.nonCompliant:C.compliant,fontWeight:600}}>{b.eui}</td>
+                                <td style={{padding:"6px 10px"}}><span style={sBadge(b.status)}>{b.status}</span></td>
+                              </tr>
+                            );})}
+                          </tbody>
+                        </table>
+                      </div>
+                      <div style={{marginTop:8,fontSize:10,color:C.muted,textAlign:"right"}}>Portfolio avg: <span style={{color:C.purple,fontWeight:700}}>{stats.avgEStar}</span> · {rows.filter(b=>b.eStar>=75).length} buildings qualify for ENERGY STAR certification</div>
+                    </Card>
+                  );
+                }
+
+                // BPS PERFORMANCE GAPS
+                if(kpiModal==="bpsGaps"){
+                  const rows=srt(stats.bpsGapBuildings.map(b=>({...b,gap:parseFloat((b.eui-b.target).toFixed(1)),gapPct:parseFloat((((b.eui-b.target)/b.target)*100).toFixed(1))})),"gap");
+                  return(
+                    <Card style={{borderTop:`2px solid ${C.atRisk}`}}>
+                      <div style={{fontSize:13,fontWeight:700,color:C.atRisk,marginBottom:4}}>BPS Performance Gaps — {rows.length} Buildings</div>
+                      <div style={{fontSize:11,color:C.muted,marginBottom:10}}>Buildings in a BPS jurisdiction where actual EUI exceeds the target. Click any column header to sort.</div>
+                      <div style={{overflowX:"auto",maxHeight:320,overflowY:"auto"}}>
+                        <table style={{width:"100%",borderCollapse:"collapse",fontSize:11}}>
+                          <thead><tr>{[["name","Building"],["city","City"],["state","ST"],["type","Type"],["sf","SF","right"],["juris","Jurisdiction"],["eui","Actual EUI","right"],["target","Target EUI","right"],["gap","Gap","right"],["gapPct","Gap %","right"],["penalty","Est. Penalty","right"],["status","Status"]].map(([col,label,align])=>kth(col,label,align))}</tr></thead>
+                          <tbody>
+                            {rows.map((b,i)=>{
+                              const gapColor=b.gapPct>20?C.nonCompliant:C.atRisk;
+                              return(
+                                <tr key={b.id} style={{borderBottom:`1px solid ${C.border}`,background:i%2===0?"transparent":C.card2}}>
+                                  <td style={{padding:"6px 10px",color:C.bright,fontWeight:600,whiteSpace:"nowrap"}}>{b.name}</td>
+                                  <td style={{padding:"6px 10px",color:C.muted}}>{b.city}</td>
+                                  <td style={{padding:"6px 10px",color:C.muted}}>{b.state}</td>
+                                  <td style={{padding:"6px 10px",color:C.muted,whiteSpace:"nowrap"}}>{b.type}</td>
+                                  <td style={{padding:"6px 10px",color:C.muted,textAlign:"right"}}>{$n(b.sf)}</td>
+                                  <td style={{padding:"6px 10px",color:C.muted,fontSize:10,whiteSpace:"nowrap"}}>{b.juris}</td>
+                                  <td style={{padding:"6px 10px",textAlign:"right",fontWeight:700,color:gapColor}}>{b.eui}</td>
+                                  <td style={{padding:"6px 10px",textAlign:"right",color:C.muted}}>{b.target}</td>
+                                  <td style={{padding:"6px 10px",textAlign:"right",fontWeight:800,color:gapColor}}>+{b.gap}</td>
+                                  <td style={{padding:"6px 10px",minWidth:100}}>
+                                    <div style={{display:"flex",alignItems:"center",gap:5}}>
+                                      <div style={{flex:1,height:5,background:C.border,borderRadius:3}}><div style={{height:5,borderRadius:3,width:`${Math.min(100,b.gapPct*2)}%`,background:gapColor}}/></div>
+                                      <span style={{fontSize:10,color:gapColor,fontWeight:700,minWidth:36}}>+{b.gapPct}%</span>
+                                    </div>
+                                  </td>
+                                  <td style={{padding:"6px 10px",textAlign:"right",fontWeight:700,color:b.penalty>0?C.nonCompliant:C.muted}}>{b.penalty>0?$usd(b.penalty):"—"}</td>
+                                  <td style={{padding:"6px 10px"}}><span style={sBadge(b.status)}>{b.status}</span></td>
+                                </tr>
+                              );
+                            })}
+                          </tbody>
+                        </table>
+                      </div>
+                      <div style={{marginTop:8,fontSize:10,color:C.muted,textAlign:"right"}}>
+                        {rows.length} buildings over target · Avg gap: <span style={{color:C.atRisk,fontWeight:700}}>+{(rows.reduce((a,b)=>a+b.gap,0)/rows.length).toFixed(1)} kBtu/sqft</span> · Total penalty exposure: <span style={{color:C.nonCompliant,fontWeight:700}}>{$usd(rows.reduce((a,b)=>a+b.penalty,0))}</span>
+                      </div>
+                    </Card>
+                  );
+                }
+
+                // MISSING FILINGS
+                if(kpiModal==="filings"){
+                  const enriched=stats.missingFilingBuildings.map(b=>({...b,overdueCount:[b.benchDue,b.auditDue,b.bpsDue].filter(d=>d&&dF(d)<0).length}));
+                  const rows=srt(enriched,"overdueCount");
+                  const overdueTypes=b=>[
+                    b.benchDue&&dF(b.benchDue)<0&&{type:"Benchmark",days:dF(b.benchDue),due:b.benchDue},
+                    b.auditDue&&dF(b.auditDue)<0&&{type:"Audit",days:dF(b.auditDue),due:b.auditDue},
+                    b.bpsDue&&dF(b.bpsDue)<0&&{type:"BPS Filing",days:dF(b.bpsDue),due:b.bpsDue},
+                  ].filter(Boolean);
+                  return(
+                    <Card style={{borderTop:`2px solid ${C.nonCompliant}`}}>
+                      <div style={{fontSize:13,fontWeight:700,color:C.nonCompliant,marginBottom:4}}>Missing Filings — {rows.length} Buildings</div>
+                      <div style={{fontSize:11,color:C.muted,marginBottom:10}}>Buildings with at least one overdue benchmarking, audit, or BPS filing deadline. Click any column header to sort.</div>
+                      <div style={{overflowX:"auto",maxHeight:320,overflowY:"auto"}}>
+                        <table style={{width:"100%",borderCollapse:"collapse",fontSize:11}}>
+                          <thead><tr>{[["name","Building"],["city","City"],["state","ST"],["juris","Jurisdiction"],["overdueCount","# Overdue","right"],["benchDue","Benchmark Due"],["auditDue","Audit Due"],["bpsDue","BPS Due"],["penalty","Penalty","right"],["status","Status"]].map(([col,label,align])=>kth(col,label,align))}</tr></thead>
+                          <tbody>
+                            {rows.map((b,i)=>{
+                              const ot=overdueTypes(b);
+                              const fmtD=due=>{if(!due)return<span style={{color:C.muted}}>N/A</span>;const d=dF(due);return<span style={{color:d<0?C.nonCompliant:d<=30?C.atRisk:C.compliant,fontWeight:d<0?700:400}}>{$dt(due)}{d<0?` (${Math.abs(d)}d)`:""}</span>;};
+                              return(
+                                <tr key={b.id} style={{borderBottom:`1px solid ${C.border}`,background:i%2===0?"transparent":C.card2}}>
+                                  <td style={{padding:"6px 10px",color:C.bright,fontWeight:600,whiteSpace:"nowrap"}}>{b.name}</td>
+                                  <td style={{padding:"6px 10px",color:C.muted}}>{b.city}</td>
+                                  <td style={{padding:"6px 10px",color:C.muted}}>{b.state}</td>
+                                  <td style={{padding:"6px 10px",color:C.muted,fontSize:10,whiteSpace:"nowrap"}}>{b.juris}</td>
+                                  <td style={{padding:"6px 10px",textAlign:"center"}}>
+                                    <div style={{display:"flex",gap:3,justifyContent:"center",flexWrap:"wrap"}}>
+                                      {ot.map((o,j)=><span key={j} style={{padding:"1px 5px",borderRadius:4,background:`${C.nonCompliant}20`,border:`1px solid ${C.nonCompliant}40`,color:C.nonCompliant,fontSize:9,fontWeight:600}}>{o.type}</span>)}
+                                    </div>
+                                  </td>
+                                  <td style={{padding:"6px 10px",whiteSpace:"nowrap"}}>{fmtD(b.benchDue)}</td>
+                                  <td style={{padding:"6px 10px",whiteSpace:"nowrap"}}>{fmtD(b.auditDue)}</td>
+                                  <td style={{padding:"6px 10px",whiteSpace:"nowrap"}}>{fmtD(b.bpsDue)}</td>
+                                  <td style={{padding:"6px 10px",textAlign:"right",fontWeight:700,color:b.penalty>0?C.nonCompliant:C.muted}}>{b.penalty>0?$usd(b.penalty):"—"}</td>
+                                  <td style={{padding:"6px 10px"}}><span style={sBadge(b.status)}>{b.status}</span></td>
+                                </tr>
+                              );
+                            })}
+                          </tbody>
+                        </table>
+                      </div>
+                      <div style={{marginTop:8,fontSize:10,color:C.muted,textAlign:"right"}}>
+                        {rows.length} buildings · Total overdue: <span style={{color:C.nonCompliant,fontWeight:700}}>{rows.reduce((a,b)=>a+overdueTypes(b).length,0)}</span> · Combined penalty: <span style={{color:C.nonCompliant,fontWeight:700}}>{$usd(rows.reduce((a,b)=>a+b.penalty,0))}</span>
+                      </div>
+                    </Card>
+                  );
+                }
+
+                // OVERDUE DEADLINES
+                if(kpiModal==="overdue"){
+                  const enriched=stats.deadlines.filter(d=>d.days<0).map(d=>{const b=ACTIVE.find(x=>x.name===d.bld);return{...d,absDays:Math.abs(d.days),juris:b?.juris||"",penalty:b?.penalty||0,status:b?.status||"N/A",bldObj:b};});
+                  const rows=srt(enriched,"absDays");
+                  return(
+                    <Card style={{borderTop:`2px solid ${C.nonCompliant}`}}>
+                      <div style={{fontSize:13,fontWeight:700,color:C.nonCompliant,marginBottom:4}}>Overdue Deadlines — {rows.length} Missed</div>
+                      <div style={{fontSize:11,color:C.muted,marginBottom:10}}>All benchmarking, audit, and BPS filing deadlines that have already passed. Click any column header to sort.</div>
+                      <div style={{overflowX:"auto",maxHeight:320,overflowY:"auto"}}>
+                        <table style={{width:"100%",borderCollapse:"collapse",fontSize:11}}>
+                          <thead><tr>{[["bld","Building"],["type","Type"],["date","Due Date"],["absDays","Days Overdue","right"],["juris","Jurisdiction"],["penalty","Penalty Exposure","right"],["status","Status"]].map(([col,label,align])=>kth(col,label,align))}</tr></thead>
+                          <tbody>
+                            {rows.map((d,i)=>(
+                              <tr key={i} style={{borderBottom:`1px solid ${C.border}`,background:i%2===0?"transparent":C.card2}}>
+                                <td style={{padding:"6px 10px",color:C.bright,fontWeight:600,whiteSpace:"nowrap"}}>{d.bld}</td>
+                                <td style={{padding:"6px 10px",color:C.muted}}>{d.type}</td>
+                                <td style={{padding:"6px 10px",color:C.muted,whiteSpace:"nowrap"}}>{$dt(d.date)}</td>
+                                <td style={{padding:"6px 10px",textAlign:"center",fontWeight:800,color:C.nonCompliant}}>{d.absDays}d</td>
+                                <td style={{padding:"6px 10px",color:C.muted,fontSize:10,whiteSpace:"nowrap"}}>{d.juris||"—"}</td>
+                                <td style={{padding:"6px 10px",textAlign:"right",fontWeight:700,color:d.penalty>0?C.nonCompliant:C.muted}}>{d.penalty>0?$usd(d.penalty):"—"}</td>
+                                <td style={{padding:"6px 10px"}}><span style={sBadge(d.status)}>{d.status}</span></td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                      <div style={{marginTop:8,fontSize:10,color:C.muted,textAlign:"right"}}>
+                        {rows.length} overdue · Combined penalty: <span style={{color:C.nonCompliant,fontWeight:700}}>{$usd(rows.reduce((a,d)=>a+d.penalty,0))}</span>
+                      </div>
+                    </Card>
+                  );
+                }
+
+                // NEXT DEADLINE
+                if(kpiModal==="next"){
+                  const enriched=stats.deadlines.filter(d=>d.days>=0).map(d=>{const b=ACTIVE.find(x=>x.name===d.bld);return{...d,juris:b?.juris||"",penalty:b?.penalty||0,status:b?.status||"N/A"};});
+                  const rows=srt(enriched,"days","asc");
+                  return(
+                    <Card style={{borderTop:`2px solid ${urgency(stats.deadlines.find(d=>d.days>=0)?.days).color}`}}>
+                      <div style={{fontSize:13,fontWeight:700,color:C.bright,marginBottom:4}}>Upcoming Deadlines — {rows.length} Total</div>
+                      <div style={{fontSize:11,color:C.muted,marginBottom:10}}>All upcoming benchmarking, audit, and BPS filing deadlines. Click any column header to sort.</div>
+                      <div style={{overflowX:"auto",maxHeight:320,overflowY:"auto"}}>
+                        <table style={{width:"100%",borderCollapse:"collapse",fontSize:11}}>
+                          <thead><tr>{[["bld","Building"],["type","Type"],["date","Due Date"],["days","Days Away","right"],["juris","Jurisdiction"],["penalty","Penalty Exposure","right"],["status","Status"]].map(([col,label,align])=>kth(col,label,align))}</tr></thead>
+                          <tbody>
+                            {rows.map((d,i)=>{
+                              const u=urgency(d.days);
+                              return(
+                                <tr key={i} style={{borderBottom:`1px solid ${C.border}`,background:i%2===0?"transparent":C.card2}}>
+                                  <td style={{padding:"6px 10px",color:C.bright,fontWeight:600,whiteSpace:"nowrap"}}>{d.bld}</td>
+                                  <td style={{padding:"6px 10px",color:C.muted}}>{d.type}</td>
+                                  <td style={{padding:"6px 10px",color:C.muted,whiteSpace:"nowrap"}}>{$dt(d.date)}</td>
+                                  <td style={{padding:"6px 10px",textAlign:"center",fontWeight:800,color:u.color}}>{d.days}d</td>
+                                  <td style={{padding:"6px 10px",color:C.muted,fontSize:10,whiteSpace:"nowrap"}}>{d.juris||"—"}</td>
+                                  <td style={{padding:"6px 10px",textAlign:"right",fontWeight:700,color:d.penalty>0?C.nonCompliant:C.muted}}>{d.penalty>0?$usd(d.penalty):"—"}</td>
+                                  <td style={{padding:"6px 10px"}}><span style={sBadge(d.status)}>{d.status}</span></td>
+                                </tr>
+                              );
+                            })}
+                          </tbody>
+                        </table>
+                      </div>
+                      <div style={{marginTop:8,fontSize:10,color:C.muted,textAlign:"right"}}>
+                        {stats.deadlines.filter(d=>d.days>=0&&d.days<=30).length} urgent (≤30d) · {stats.deadlines.filter(d=>d.days>30&&d.days<=60).length} due in 31–60d
+                      </div>
+                    </Card>
+                  );
+                }
+              })()}
+            </div>
+          </div>
+        )}
+
+        {/* ANALYTICS */}
+        {tab==="analytics" && (
+          <div style={{display:"flex",flexDirection:"column",gap:12}}>
+            <Card>
+              <div style={{fontSize:13,fontWeight:700,color:C.bright,marginBottom:8}}>Portfolio Energy Trend — Last 12 Months</div>
+              <ResponsiveContainer width="100%" height={200}>
+                <LineChart data={MONTHLY} margin={{top:5,right:20,bottom:5,left:0}}>
+                  <CartesianGrid strokeDasharray="3 3" stroke={C.border}/>
+                  <XAxis dataKey="m" tick={{fill:C.muted,fontSize:10}}/>
+                  <YAxis yAxisId="l" tick={{fill:C.muted,fontSize:10}}/>
+                  <YAxis yAxisId="r" orientation="right" tick={{fill:C.muted,fontSize:10}}/>
+                  <Tooltip {...tt}/>
+                  <Legend wrapperStyle={{fontSize:11,color:C.muted}}/>
+                  <Line yAxisId="l" type="monotone" dataKey="eui" stroke={C.blue} strokeWidth={2} dot={false} name="Avg EUI"/>
+                  <Line yAxisId="r" type="monotone" dataKey="ghg" stroke={C.purple} strokeWidth={2} dot={false} name="Avg GHG"/>
+                  <Line yAxisId="r" type="monotone" dataKey="cost" stroke={C.orange} strokeWidth={1.5} dot={false} name="Energy Cost ($K)" strokeDasharray="4 2"/>
+                </LineChart>
+              </ResponsiveContainer>
+            </Card>
+            <div style={{display:"flex",gap:12,flexWrap:"wrap"}}>
+              <Card style={{flex:"2 1 340px"}}>
+                <div style={{fontSize:13,fontWeight:700,color:C.bright,marginBottom:8}}>Scope 1 vs Scope 2 Emissions — Sample Buildings (mtCO₂e)</div>
+                <ResponsiveContainer width="100%" height={200}>
+                  <BarChart data={scopeSample} margin={{top:0,right:5,bottom:26,left:-10}}>
+                    <CartesianGrid strokeDasharray="3 3" stroke={C.border}/>
+                    <XAxis dataKey="name" tick={{fill:C.muted,fontSize:9}} angle={-35} textAnchor="end" interval={0}/>
+                    <YAxis tick={{fill:C.muted,fontSize:10}}/>
+                    <Tooltip {...tt}/>
+                    <Legend wrapperStyle={{fontSize:11}}/>
+                    <Bar dataKey="Scope 1" stackId="a" fill={C.orange}/>
+                    <Bar dataKey="Scope 2" stackId="a" fill={C.accent} radius={[3,3,0,0]}/>
+                  </BarChart>
+                </ResponsiveContainer>
+              </Card>
+              <Card style={{flex:"1 1 200px"}}>
+                <div style={{fontSize:13,fontWeight:700,color:C.bright,marginBottom:8}}>Projected Penalty Exposure ($K)</div>
+                <ResponsiveContainer width="100%" height={200}>
+                  <BarChart data={PENALTY_PROJ} margin={{top:0,right:5,bottom:5,left:-10}}>
+                    <CartesianGrid strokeDasharray="3 3" stroke={C.border}/>
+                    <XAxis dataKey="yr" tick={{fill:C.muted,fontSize:11}}/>
+                    <YAxis tick={{fill:C.muted,fontSize:10}}/>
+                    <Tooltip {...tt} formatter={v=>[$usd(v*1000),"Est. Penalties"]}/>
+                    <Bar dataKey="v" radius={[3,3,0,0]}>
+                      {PENALTY_PROJ.map((_,i)=><Cell key={i} fill={i===0?C.atRisk:i===1?"#f97316":C.nonCompliant}/>)}
+                    </Bar>
+                  </BarChart>
+                </ResponsiveContainer>
+              </Card>
+            </div>
+            <Card>
+              <div style={{fontSize:13,fontWeight:700,color:C.bright,marginBottom:10}}>ENERGY STAR Score by Building (first 30 active assets)</div>
+              <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
+                {ACTIVE.slice(0,30).map(b=>(
+                  <div key={b.id} style={{flex:"1 1 130px",background:C.card2,borderRadius:7,padding:"9px 10px",border:`1px solid ${C.border}`}}>
+                    <div style={{fontSize:10,fontWeight:600,color:C.bright,marginBottom:5,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{b.name}</div>
+                    <div style={{display:"flex",justifyContent:"space-between",marginBottom:3}}>
+                      <span style={{fontSize:9,color:C.muted}}>E★</span>
+                      <span style={{fontSize:12,fontWeight:800,color:b.eStar>=75?C.compliant:b.eStar>=50?C.atRisk:C.nonCompliant}}>{b.eStar}</span>
+                    </div>
+                    <div style={{height:3,background:C.border,borderRadius:2,marginBottom:6}}>
+                      <div style={{height:3,borderRadius:2,width:`${b.eStar}%`,background:b.eStar>=75?C.compliant:b.eStar>=50?C.atRisk:C.nonCompliant}}/>
+                    </div>
+                    <div style={{fontSize:9,color:b.yoyEui<0?C.compliant:C.nonCompliant}}>YoY: {b.yoyEui>0?"+":""}{b.yoyEui}%</div>
+                  </div>
+                ))}
+              </div>
+            </Card>
+          </div>
+        )}
+
+        {/* BUILDINGS */}
+        {tab==="buildings" && (
+          <div style={{display:"flex",flexDirection:"column",gap:10}}>
+            <div style={{display:"flex",gap:6,flexWrap:"wrap",alignItems:"center"}}>
+              <input value={search} onChange={e=>{setSearch(e.target.value);setPage(0);}} placeholder="Search name or city…" style={{padding:"5px 10px",borderRadius:6,border:`1px solid ${C.border}`,background:C.card2,color:C.bright,fontSize:12,width:180}}/>
+              <span style={{fontSize:11,color:C.muted}}>Status:</span>
+              {["all","Compliant","At-Risk","Non-Compliant","N/A"].map(v=>(
+                <button key={v} onClick={()=>{setStatusF(v);setPage(0);}} style={{padding:"4px 10px",borderRadius:20,fontSize:10,cursor:"pointer",border:`1px solid ${C.border}`,background:statusF===v?C.accent:"transparent",color:statusF===v?C.bright:C.muted}}>{v==="all"?"All":v}</button>
+              ))}
+              <span style={{fontSize:11,color:C.muted,marginLeft:4}}>Type:</span>
+              <select value={typeF} onChange={e=>{setTypeF(e.target.value);setPage(0);}} style={{padding:"4px 8px",borderRadius:6,border:`1px solid ${C.border}`,background:C.card2,color:C.text,fontSize:11}}>
+                <option value="all">All Types</option>
+                {allTypes.map(t=><option key={t} value={t}>{t}</option>)}
+              </select>
+              <select value={stateF} onChange={e=>{setStateF(e.target.value);setPage(0);}} style={{padding:"4px 8px",borderRadius:6,border:`1px solid ${C.border}`,background:C.card2,color:C.text,fontSize:11}}>
+                <option value="all">All States</option>
+                {allStates.map(s=><option key={s} value={s}>{s}</option>)}
+              </select>
+              <span style={{marginLeft:"auto",fontSize:11,color:C.muted}}>{filtered.length} assets · Page {page+1}/{totalPages}</span>
+            </div>
+            <Card style={{padding:0,overflow:"hidden"}}>
+              <div style={{overflowX:"auto"}}>
+                <table style={{width:"100%",borderCollapse:"collapse",fontSize:11}}>
+                  <thead>
+                    <tr>
+                      {th("name","Building")}{th("city","City")}{th("state","ST")}{th("type","Type")}{th("sf","SF")}{th("status","Status")}{th("eui","EUI")}{th("target","Target")}{th("eStar","E★")}{th("ghgInt","GHG Int.")}{th("cert","Cert")}{th("covered","Covered")}{th("bpsJuris","BPS Juris")}{th("juris","Jurisdiction")}{th("needsBench","Bench Req")}{th("needsAudit","Audit Req")}{th("penalty","Penalty")}{th("openDef","Open Def")}{th("impl","Impl%")}{th("capNeed","Cap Need")}{th("retro","Retro")}{th("decarb","Decarb")}{th("yoyEui","YoY EUI")}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {paged.map((b,i)=>(
+                      <tr key={b.id} style={{borderBottom:`1px solid ${C.border}`,background:i%2===0?"transparent":C.card2}}>
+                        {td(b.name,{color:C.bright,fontWeight:600,whiteSpace:"nowrap",maxWidth:160,overflow:"hidden",textOverflow:"ellipsis"})}
+                        {td(b.city,{color:C.muted,whiteSpace:"nowrap"})}
+                        {td(b.state,{color:C.muted})}
+                        {td(b.type,{color:C.muted,whiteSpace:"nowrap"})}
+                        {td($n(b.sf),{textAlign:"right",color:C.muted})}
+                        {td(<span style={sBadge(b.status)}>{b.status}</span>)}
+                        {td(b.eui??"—",{textAlign:"right",fontWeight:700,color:b.eui&&b.target?(b.eui>b.target?(b.eui-b.target>b.target*0.2?C.nonCompliant:C.atRisk):C.compliant):C.muted})}
+                        {td(b.target??"—",{textAlign:"right",color:C.muted})}
+                        {td(b.eStar??"—",{textAlign:"right",fontWeight:700,color:b.eStar?(b.eStar>=75?C.compliant:b.eStar>=50?C.atRisk:C.nonCompliant):C.muted})}
+                        {td(b.ghgInt??"—",{textAlign:"right",color:C.muted})}
+                        {td(b.cert??"—",{color:b.cert&&b.cert!=="None"?C.teal:C.muted,whiteSpace:"nowrap"})}
+                        {td(b.covered?"✓":"—",{textAlign:"center",color:b.covered?C.compliant:C.muted})}
+                        {td(b.bpsJuris?"✓":"—",{textAlign:"center",color:b.bpsJuris?C.compliant:C.muted})}
+                        {td(b.juris,{color:C.muted,whiteSpace:"nowrap",fontSize:10})}
+                        {td(b.needsBench?"✓":"—",{textAlign:"center",color:b.needsBench?C.atRisk:C.muted})}
+                        {td(b.needsAudit?"✓":"—",{textAlign:"center",color:b.needsAudit?C.atRisk:C.muted})}
+                        {td(b.penalty>0?$usd(b.penalty):"—",{textAlign:"right",fontWeight:700,color:b.penalty>0?C.nonCompliant:C.compliant})}
+                        {td(b.openDef,{textAlign:"center",color:b.openDef>8?C.nonCompliant:b.openDef>0?C.atRisk:C.compliant})}
+                        {td(b.impl!=null?`${b.impl}%`:"—",{textAlign:"right",color:b.impl!=null?(b.impl>=75?C.compliant:b.impl>=50?C.atRisk:C.nonCompliant):C.muted,fontWeight:600})}
+                        {td(b.capNeed?$usd(b.capNeed):"—",{textAlign:"right",color:C.muted})}
+                        {td(b.retro??"—",{color:b.retro==="Complete"?C.compliant:b.retro==="Not Started"?C.nonCompliant:C.atRisk,whiteSpace:"nowrap"})}
+                        {td(b.decarb?"✓":"—",{textAlign:"center",color:b.decarb?C.compliant:C.muted})}
+                        {td(b.yoyEui!=null?`${b.yoyEui>0?"+":""}${b.yoyEui}%`:"—",{textAlign:"right",fontWeight:700,color:b.yoyEui!=null?(b.yoyEui<0?C.compliant:C.nonCompliant):C.muted})}
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </Card>
+            <div style={{display:"flex",gap:6,justifyContent:"center",alignItems:"center"}}>
+              <button onClick={()=>setPage(0)} disabled={page===0} style={{padding:"4px 10px",borderRadius:5,border:`1px solid ${C.border}`,background:C.card2,color:page===0?C.muted:C.bright,cursor:page===0?"not-allowed":"pointer",fontSize:11}}>«</button>
+              <button onClick={()=>setPage(p=>Math.max(0,p-1))} disabled={page===0} style={{padding:"4px 10px",borderRadius:5,border:`1px solid ${C.border}`,background:C.card2,color:page===0?C.muted:C.bright,cursor:page===0?"not-allowed":"pointer",fontSize:11}}>‹</button>
+              <span style={{fontSize:11,color:C.muted}}>Page {page+1} of {totalPages}</span>
+              <button onClick={()=>setPage(p=>Math.min(totalPages-1,p+1))} disabled={page===totalPages-1} style={{padding:"4px 10px",borderRadius:5,border:`1px solid ${C.border}`,background:C.card2,color:page===totalPages-1?C.muted:C.bright,cursor:page===totalPages-1?"not-allowed":"pointer",fontSize:11}}>›</button>
+              <button onClick={()=>setPage(totalPages-1)} disabled={page===totalPages-1} style={{padding:"4px 10px",borderRadius:5,border:`1px solid ${C.border}`,background:C.card2,color:page===totalPages-1?C.muted:C.bright,cursor:page===totalPages-1?"not-allowed":"pointer",fontSize:11}}>»</button>
+            </div>
+          </div>
+        )}
+
+        {/* COMPLIANCE */}
+        {tab==="compliance" && (
+          <div style={{display:"flex",flexDirection:"column",gap:12}}>
+            <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
+              <KpiCard label="Total Penalty Exposure" value={$usd(stats.totalPen)} sub="Current year" color={C.nonCompliant}/>
+              <KpiCard label="Capital Needed" value={`$${(stats.totalCap/1000000).toFixed(0)}M`} sub="For compliance" color={C.atRisk}/>
+              <KpiCard label="BPS Perf. Gaps" value={stats.bpsGaps} sub="Over target in BPS juris." color={C.atRisk}/>
+              <KpiCard label="Missing Filings" value={stats.missingFilings} sub="Overdue deadlines" color={C.nonCompliant}/>
+              <KpiCard label="Overdue Deadlines" value={stats.deadlines.filter(d=>d.days<0).length} sub="Missed" color={C.nonCompliant}/>
+              <KpiCard label="Due ≤ 30 Days" value={stats.deadlines.filter(d=>d.days>=0&&d.days<=30).length} sub="Urgent" color={C.atRisk}/>
+            </div>
+            <Card>
+              <div style={{fontSize:13,fontWeight:700,color:C.bright,marginBottom:12}}>⏱ Deadline Tracker</div>
+              {bandDefs.map(band=>{
+                const items=stats.deadlines.filter(d=>band.fn(d.days)).slice(0,20);
+                if(!items.length)return null;
+                return (
+                  <div key={band.label} style={{marginBottom:14}}>
+                    <div style={{fontSize:11,fontWeight:700,color:band.color,textTransform:"uppercase",letterSpacing:".5px",marginBottom:6,display:"flex",alignItems:"center",gap:6}}>
+                      <div style={{width:7,height:7,borderRadius:"50%",background:band.color}}/>{band.label} — {stats.deadlines.filter(d=>band.fn(d.days)).length} deadline{stats.deadlines.filter(d=>band.fn(d.days)).length>1?"s":""}
+                    </div>
+                    <div style={{display:"flex",flexDirection:"column",gap:2}}>
+                      {items.map((d,i)=>{const u=urgency(d.days);return(
+                        <div key={i} style={{display:"flex",alignItems:"center",gap:10,padding:"7px 10px",background:C.card2,borderRadius:5,border:`1px solid ${C.border}`}}>
+                          <div style={{width:5,height:5,borderRadius:"50%",background:u.color,flexShrink:0}}/>
+                          <div style={{flex:1,fontWeight:500,color:C.bright,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{d.bld}</div>
+                          <div style={{fontSize:10,color:C.muted,width:80}}>{d.type}</div>
+                          <div style={{fontSize:10,color:C.muted,width:100}}>{$dt(d.date)}</div>
+                          <div style={{fontSize:11,fontWeight:800,color:u.color,minWidth:90,textAlign:"right"}}>{u.label}</div>
+                        </div>
+                      );})}
+                    </div>
+                  </div>
+                );
+              })}
+            </Card>
+            <Card>
+              <div style={{fontSize:13,fontWeight:700,color:C.bright,marginBottom:10}}>💸 Top 30 Penalty Exposures</div>
+              <div style={{overflowX:"auto"}}>
+                <table style={{width:"100%",borderCollapse:"collapse",fontSize:11}}>
+                  <thead>
+                    <tr>
+                      {["Building","City","ST","Jurisdiction","Violation Type","Est. Penalty","Open Def","Impl%","Cap Needed","Status"].map(h=>(
+                        <th key={h} style={{padding:"8px 10px",textAlign:"left",color:C.muted,fontWeight:600,fontSize:10,borderBottom:`1px solid ${C.border}`,whiteSpace:"nowrap",background:C.card2}}>{h}</th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {[...ACTIVE].sort((a,b)=>b.penalty-a.penalty).slice(0,30).map((b,i)=>(
+                      <tr key={b.id} style={{borderBottom:`1px solid ${C.border}`,background:i%2===0?"transparent":C.card2}}>
+                        {td(b.name,{color:C.bright,fontWeight:600,whiteSpace:"nowrap"})}
+                        {td(b.city,{color:C.muted})}
+                        {td(b.state,{color:C.muted})}
+                        {td(b.juris,{color:C.muted,fontSize:10,whiteSpace:"nowrap"})}
+                        {td(b.penType,{color:b.penalty>0?C.atRisk:C.muted,whiteSpace:"nowrap"})}
+                        {td(b.penalty>0?$usd(b.penalty):"$0",{textAlign:"right",fontWeight:800,color:b.penalty>0?C.nonCompliant:C.compliant})}
+                        {td(b.openDef,{textAlign:"center",color:b.openDef>8?C.nonCompliant:b.openDef>0?C.atRisk:C.compliant})}
+                        {td(`${b.impl}%`,{textAlign:"right",color:b.impl>=75?C.compliant:b.impl>=50?C.atRisk:C.nonCompliant,fontWeight:600})}
+                        {td($usd(b.capNeed),{textAlign:"right",color:C.muted})}
+                        {td(<span style={sBadge(b.status)}>{b.status}</span>)}
+                      </tr>
+                    ))}
+                    <tr style={{background:`${C.accent}12`,borderTop:`2px solid ${C.accent}40`}}>
+                      <td colSpan={5} style={{padding:"8px 10px",color:C.bright,fontWeight:800}}>PORTFOLIO TOTAL</td>
+                      {td($usd(stats.totalPen),{textAlign:"right",fontWeight:800,color:C.nonCompliant,fontSize:14})}
+                      {td(stats.bpsGaps,{textAlign:"center",fontWeight:800,color:C.atRisk})}
+                      {td("—",{textAlign:"right"})}
+                      {td($usd(stats.totalCap),{textAlign:"right",fontWeight:800,color:C.atRisk})}
+                      <td/>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+            </Card>
+          </div>
+        )}
+
+        {/* INCENTIVES */}
+        {tab==="incentives" && (
+          <div style={{display:"flex",flexDirection:"column",gap:12}}>
+            <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
+              <KpiCard label="Total Incentive Potential" value={`$${(stats.totalIncent/1000000).toFixed(0)}M`} sub="Across portfolio" color={C.compliant}/>
+              <KpiCard label="Buildings w/ Incentives" value={ACTIVE.filter(b=>b.incentives.length>0).length} sub={`of ${stats.n} active`} color={C.blue}/>
+              <KpiCard label="Avg Incentive / Bldg" value={$usd(Math.round(stats.totalIncent/stats.n))} sub="Portfolio average" color={C.teal}/>
+              <KpiCard label="Total Penalties" value={$usd(stats.totalPen)} sub="Current exposure" color={C.nonCompliant}/>
+              <KpiCard label="Net After Incentives" value={$usd(Math.max(0,stats.totalPen-stats.totalIncent))} sub={stats.totalIncent>stats.totalPen?"✓ Incentives exceed penalties":"Remaining gap"} color={stats.totalIncent>stats.totalPen?C.compliant:C.atRisk}/>
+            </div>
+            <Card>
+              <div style={{fontSize:13,fontWeight:700,color:C.bright,marginBottom:8}}>Incentive Potential vs. Penalty Exposure — Top 18 Buildings</div>
+              <ResponsiveContainer width="100%" height={210}>
+                <BarChart data={incentVsPen} margin={{top:0,right:10,bottom:26,left:0}}>
+                  <CartesianGrid strokeDasharray="3 3" stroke={C.border}/>
+                  <XAxis dataKey="name" tick={{fill:C.muted,fontSize:9}} angle={-35} textAnchor="end" interval={0}/>
+                  <YAxis tick={{fill:C.muted,fontSize:10}}/>
+                  <Tooltip {...tt} formatter={v=>[$usd(v)]}/>
+                  <Legend wrapperStyle={{fontSize:11}}/>
+                  <Bar dataKey="Incentives" fill={C.compliant} radius={[3,3,0,0]}/>
+                  <Bar dataKey="Penalties" fill={C.nonCompliant} radius={[3,3,0,0]}/>
+                </BarChart>
+              </ResponsiveContainer>
+            </Card>
+            <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(270px,1fr))",gap:10}}>
+              {[...ACTIVE].sort((a,b)=>b.incentAmt-a.incentAmt).slice(0,30).map(b=>{
+                const net=b.incentAmt-b.penalty;
+                const bc=b.incentAmt>500000?C.compliant:b.incentAmt>200000?C.teal:b.incentAmt>100000?C.cyan:C.accent;
+                return(
+                  <Card key={b.id} style={{borderLeft:`3px solid ${bc}`}}>
+                    <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:8}}>
+                      <div>
+                        <div style={{fontWeight:700,color:C.bright,fontSize:12}}>{b.name}</div>
+                        <div style={{fontSize:10,color:C.muted,marginTop:1}}>{b.city}, {b.state} · {b.type}</div>
+                        <div style={{fontSize:10,color:C.muted}}>{b.juris}</div>
+                      </div>
+                      <div style={{textAlign:"right",flexShrink:0,marginLeft:8}}>
+                        <div style={{fontSize:16,fontWeight:800,color:C.compliant}}>{$usd(b.incentAmt)}</div>
+                        <div style={{fontSize:9,color:C.muted}}>incentive potential</div>
+                      </div>
+                    </div>
+                    <div style={{display:"flex",flexDirection:"column",gap:3,marginBottom:8}}>
+                      {b.incentives.map((inc,i)=>(
+                        <div key={i} style={{display:"flex",alignItems:"center",gap:6,padding:"4px 8px",background:C.card2,borderRadius:4,border:`1px solid ${C.border}`}}>
+                          <span style={{color:C.compliant,fontSize:9}}>✦</span>
+                          <span style={{fontSize:11,color:C.text}}>{inc}</span>
+                        </div>
+                      ))}
+                    </div>
+                    <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",paddingTop:8,borderTop:`1px solid ${C.border}`}}>
+                      <span style={{fontSize:10,color:C.muted}}>Penalty: <span style={{color:b.penalty>0?C.nonCompliant:C.compliant,fontWeight:700}}>{b.penalty>0?$usd(b.penalty):"None"}</span></span>
+                      <span style={sBadge(b.status)}>{b.status}</span>
+                    </div>
+                    {b.penalty>0&&(
+                      <div style={{marginTop:6,fontSize:10,padding:"4px 8px",background:net>=0?"#031a0e":"#1a0800",borderRadius:4,color:net>=0?C.compliant:C.atRisk,border:`1px solid ${net>=0?C.compliant:C.atRisk}30`,fontWeight:600}}>
+                        {net>=0?`✓ Surplus: ${$usd(net)}`:`⚠ Gap: ${$usd(Math.abs(net))}`}
+                      </div>
+                    )}
+                  </Card>
+                );
+              })}
+            </div>
+          </div>
+        )}
+
+        {/* DATA IMPORT */}
+        {tab==="import" && (
+          <div style={{display:"flex",flexDirection:"column",gap:12}}>
+            <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
+              <KpiCard label="Current Assets" value={BUILDINGS.length} sub="In portfolio" color={C.blue}/>
+              <KpiCard label="Active Buildings" value={ACTIVE.length} sub="Non-land, SF > 0" color={C.cyan}/>
+              <KpiCard label="States Covered" value={allStates.length} sub="Jurisdictions" color={C.purple}/>
+              <KpiCard label="Import History" value={importHistory.length} sub="Total imports" color={C.accent}/>
+            </div>
+
+            <Card>
+              <div style={{fontSize:13,fontWeight:700,color:C.bright,marginBottom:4}}>Upload Building Data</div>
+              <div style={{fontSize:11,color:C.muted,marginBottom:14}}>Import building data from CSV or JSON files. Supports columns: id, name, city, state, type, sf (square footage).</div>
+
+              <div style={{display:"flex",gap:12,alignItems:"flex-start",flexWrap:"wrap",marginBottom:14}}>
+                <div style={{flex:"1 1 300px"}}>
+                  <div style={{border:`2px dashed ${C.border}`,borderRadius:10,padding:"28px 20px",textAlign:"center",cursor:"pointer",background:C.card2,transition:"border-color .15s"}} onClick={()=>fileRef.current?.click()}>
+                    <div style={{fontSize:28,marginBottom:8,color:C.accent}}>↥</div>
+                    <div style={{fontSize:12,fontWeight:600,color:C.bright,marginBottom:4}}>Click to upload CSV or JSON</div>
+                    <div style={{fontSize:10,color:C.muted}}>Drag & drop also supported</div>
+                    <input ref={fileRef} type="file" accept=".csv,.json" onChange={handleFileUpload} style={{display:"none"}}/>
+                  </div>
+                </div>
+
+                <div style={{flex:"1 1 250px"}}>
+                  <div style={{fontSize:11,fontWeight:600,color:C.muted,marginBottom:6,textTransform:"uppercase",letterSpacing:".4px"}}>Import Mode</div>
+                  <div style={{display:"flex",gap:6,marginBottom:12}}>
+                    {["merge","replace"].map(m=>(
+                      <button key={m} onClick={()=>setImportMode(m)} style={{padding:"6px 16px",borderRadius:6,fontSize:11,cursor:"pointer",border:`1px solid ${importMode===m?C.accent:C.border}`,background:importMode===m?`${C.accent}20`:"transparent",color:importMode===m?C.accent:C.muted,fontWeight:importMode===m?700:400}}>
+                        {m==="merge"?"Merge (Add/Update)":"Replace All"}
+                      </button>
+                    ))}
+                  </div>
+
+                  <div style={{fontSize:11,fontWeight:600,color:C.muted,marginBottom:6,textTransform:"uppercase",letterSpacing:".4px"}}>Expected Format</div>
+                  <div style={{background:C.card2,borderRadius:6,padding:"8px 12px",border:`1px solid ${C.border}`,fontSize:10,fontFamily:"monospace",color:C.text,lineHeight:1.6}}>
+                    <div style={{color:C.cyan}}>CSV:</div>
+                    <div>id,name,city,state,type,sf</div>
+                    <div>139,New Building,Boston,MA,Office,85000</div>
+                    <div style={{color:C.cyan,marginTop:6}}>JSON:</div>
+                    <div>{"[{\"id\":139,\"name\":\"...\",\"sf\":85000}]"}</div>
+                  </div>
+                </div>
+              </div>
+
+              {importStatus&&(
+                <div style={{padding:"8px 14px",borderRadius:6,marginBottom:12,background:importStatus.type==="error"?`${C.nonCompliant}15`:`${C.compliant}15`,border:`1px solid ${importStatus.type==="error"?C.nonCompliant:C.compliant}40`,color:importStatus.type==="error"?C.nonCompliant:C.compliant,fontSize:11,fontWeight:600}}>
+                  {importStatus.type==="error"?"Error: ":"Success: "}{importStatus.msg}
+                </div>
+              )}
+
+              {importPreview.length>0&&(
+                <div>
+                  <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8}}>
+                    <div style={{fontSize:12,fontWeight:700,color:C.bright}}>Preview ({importData?.length} records, showing first {importPreview.length})</div>
+                    <div style={{display:"flex",gap:6}}>
+                      <button onClick={()=>{setImportData(null);setImportPreview([]);setImportStatus(null);}} style={{padding:"5px 14px",borderRadius:6,fontSize:11,cursor:"pointer",border:`1px solid ${C.border}`,background:"transparent",color:C.muted}}>Cancel</button>
+                      <button onClick={confirmImport} style={{padding:"5px 14px",borderRadius:6,fontSize:11,cursor:"pointer",border:`1px solid ${C.compliant}`,background:`${C.compliant}20`,color:C.compliant,fontWeight:700}}>Confirm {importMode==="merge"?"Merge":"Replace"}</button>
+                    </div>
+                  </div>
+                  <div style={{overflowX:"auto",maxHeight:300}}>
+                    <table style={{width:"100%",borderCollapse:"collapse",fontSize:10}}>
+                      <thead>
+                        <tr>{Object.keys(importPreview[0]).map(k=><th key={k} style={{padding:"6px 8px",textAlign:"left",color:C.muted,fontWeight:600,borderBottom:`1px solid ${C.border}`,background:C.card2,whiteSpace:"nowrap"}}>{k}</th>)}</tr>
+                      </thead>
+                      <tbody>
+                        {importPreview.map((row,i)=>(
+                          <tr key={i} style={{borderBottom:`1px solid ${C.border}`,background:i%2===0?"transparent":C.card2}}>
+                            {Object.values(row).map((v,j)=><td key={j} style={{padding:"5px 8px",color:C.text,whiteSpace:"nowrap"}}>{String(v)}</td>)}
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              )}
+            </Card>
+
+            {importHistory.length>0&&(
+              <Card>
+                <div style={{fontSize:13,fontWeight:700,color:C.bright,marginBottom:8}}>Import History</div>
+                <div style={{display:"flex",flexDirection:"column",gap:4}}>
+                  {importHistory.map((h,i)=>(
+                    <div key={i} style={{display:"flex",alignItems:"center",gap:10,padding:"7px 12px",background:C.card2,borderRadius:5,border:`1px solid ${C.border}`}}>
+                      <div style={{fontSize:10,color:C.muted,width:130}}>{$dt(h.date)}</div>
+                      <div style={{fontSize:11,color:C.bright,fontWeight:600,flex:1}}>{h.count} records</div>
+                      <span style={{padding:"2px 8px",borderRadius:4,fontSize:10,background:h.mode==="merge"?`${C.accent}20`:`${C.atRisk}20`,color:h.mode==="merge"?C.accent:C.atRisk,border:`1px solid ${h.mode==="merge"?C.accent:C.atRisk}40`}}>{h.mode}</span>
+                    </div>
+                  ))}
+                </div>
+              </Card>
+            )}
+
+            <Card>
+              <div style={{fontSize:13,fontWeight:700,color:C.bright,marginBottom:4}}>Current Portfolio Summary</div>
+              <div style={{fontSize:11,color:C.muted,marginBottom:10}}>Breakdown of currently loaded building data by type and state.</div>
+              <div style={{display:"flex",gap:16,flexWrap:"wrap"}}>
+                <div style={{flex:"1 1 200px"}}>
+                  <div style={{fontSize:10,fontWeight:600,color:C.muted,textTransform:"uppercase",letterSpacing:".4px",marginBottom:6}}>By Property Type</div>
+                  {allTypes.map(t=>{const cnt=ACTIVE.filter(b=>b.type===t).length;const pct=Math.round(cnt/ACTIVE.length*100);return(
+                    <div key={t} style={{display:"flex",alignItems:"center",gap:8,marginBottom:4}}>
+                      <div style={{fontSize:11,color:C.text,width:100}}>{t}</div>
+                      <div style={{flex:1,height:5,background:C.border,borderRadius:3}}><div style={{height:5,borderRadius:3,width:`${pct}%`,background:C.accent}}/></div>
+                      <div style={{fontSize:10,color:C.muted,width:40,textAlign:"right"}}>{cnt}</div>
+                    </div>
+                  );})}
+                </div>
+                <div style={{flex:"1 1 200px"}}>
+                  <div style={{fontSize:10,fontWeight:600,color:C.muted,textTransform:"uppercase",letterSpacing:".4px",marginBottom:6}}>Top States</div>
+                  {[...new Set(ACTIVE.map(b=>b.state))].map(s=>({s,c:ACTIVE.filter(b=>b.state===s).length})).sort((a,b)=>b.c-a.c).slice(0,12).map(({s,c})=>{const pct=Math.round(c/ACTIVE.length*100);return(
+                    <div key={s} style={{display:"flex",alignItems:"center",gap:8,marginBottom:4}}>
+                      <div style={{fontSize:11,color:C.text,width:30}}>{s}</div>
+                      <div style={{flex:1,height:5,background:C.border,borderRadius:3}}><div style={{height:5,borderRadius:3,width:`${pct}%`,background:C.cyan}}/></div>
+                      <div style={{fontSize:10,color:C.muted,width:40,textAlign:"right"}}>{c}</div>
+                    </div>
+                  );})}
+                </div>
+              </div>
+            </Card>
+          </div>
+        )}
+
+        {/* ACTION ITEMS */}
+        {tab==="actions" && (()=>{
+          const filteredActions=actionItems.filter(a=>{
+            if(actionFilter.status!=="all"&&a.status!==actionFilter.status)return false;
+            if(actionFilter.priority!=="all"&&a.priority!==actionFilter.priority)return false;
+            if(actionFilter.category!=="all"&&a.category!==actionFilter.category)return false;
+            if(actionFilter.building&&!a.building.toLowerCase().includes(actionFilter.building.toLowerCase()))return false;
+            return true;
+          });
+          const openCt=actionItems.filter(a=>a.status==="open").length;
+          const inProgCt=actionItems.filter(a=>a.status==="in-progress").length;
+          const completedCt=actionItems.filter(a=>a.status==="completed").length;
+          const highPriCt=actionItems.filter(a=>a.priority==="high"&&a.status!=="completed").length;
+          const overdueCt=actionItems.filter(a=>a.status!=="completed"&&dF(a.dueDate)<0).length;
+          const categories=[...new Set(actionItems.map(a=>a.category))].sort();
+          const pColor={high:C.nonCompliant,medium:C.atRisk,low:C.compliant};
+          const sColor={open:C.blue,"in-progress":C.atRisk,completed:C.compliant};
+
+          return(
+            <div style={{display:"flex",flexDirection:"column",gap:12}}>
+              <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
+                <KpiCard label="Open Items" value={openCt} sub="Need attention" color={C.blue}/>
+                <KpiCard label="In Progress" value={inProgCt} sub="Being worked on" color={C.atRisk}/>
+                <KpiCard label="Completed" value={completedCt} sub="Done" color={C.compliant}/>
+                <KpiCard label="High Priority" value={highPriCt} sub="Urgent items" color={C.nonCompliant}/>
+                <KpiCard label="Overdue" value={overdueCt} sub="Past due date" color={C.nonCompliant}/>
+              </div>
+
+              <Card>
+                <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",flexWrap:"wrap",gap:8,marginBottom:12}}>
+                  <div>
+                    <div style={{fontSize:13,fontWeight:700,color:C.bright}}>Action Item Tracker</div>
+                    <div style={{fontSize:10,color:C.muted,marginTop:2}}>Track compliance tasks, audits, filings, and remediation work</div>
+                  </div>
+                  <div style={{display:"flex",gap:6,alignItems:"center",flexWrap:"wrap"}}>
+                    <input value={actionFilter.building} onChange={e=>setActionFilter(f=>({...f,building:e.target.value}))} placeholder="Filter building..." style={{padding:"4px 8px",borderRadius:6,border:`1px solid ${C.border}`,background:C.card2,color:C.bright,fontSize:10,width:120}}/>
+                    <select value={actionFilter.status} onChange={e=>setActionFilter(f=>({...f,status:e.target.value}))} style={{padding:"4px 8px",borderRadius:6,border:`1px solid ${C.border}`,background:C.card2,color:C.text,fontSize:10}}>
+                      <option value="all">All Status</option>
+                      <option value="open">Open</option>
+                      <option value="in-progress">In Progress</option>
+                      <option value="completed">Completed</option>
+                    </select>
+                    <select value={actionFilter.priority} onChange={e=>setActionFilter(f=>({...f,priority:e.target.value}))} style={{padding:"4px 8px",borderRadius:6,border:`1px solid ${C.border}`,background:C.card2,color:C.text,fontSize:10}}>
+                      <option value="all">All Priority</option>
+                      <option value="high">High</option>
+                      <option value="medium">Medium</option>
+                      <option value="low">Low</option>
+                    </select>
+                    <select value={actionFilter.category} onChange={e=>setActionFilter(f=>({...f,category:e.target.value}))} style={{padding:"4px 8px",borderRadius:6,border:`1px solid ${C.border}`,background:C.card2,color:C.text,fontSize:10}}>
+                      <option value="all">All Categories</option>
+                      {categories.map(c=><option key={c} value={c}>{c}</option>)}
+                    </select>
+                    <button onClick={()=>setNewAction({title:"",building:"",priority:"medium",category:"General",dueDate:addD(30),assignee:""})} style={{padding:"4px 12px",borderRadius:6,fontSize:10,cursor:"pointer",border:`1px solid ${C.accent}`,background:`${C.accent}20`,color:C.accent,fontWeight:700}}>+ New Item</button>
+                  </div>
+                </div>
+
+                {newAction&&(
+                  <div style={{background:`${C.accent}08`,border:`1px solid ${C.accent}40`,borderRadius:8,padding:14,marginBottom:12}}>
+                    <div style={{fontSize:12,fontWeight:700,color:C.accent,marginBottom:10}}>New Action Item</div>
+                    <div style={{display:"flex",gap:8,flexWrap:"wrap",marginBottom:8}}>
+                      <input value={newAction.title} onChange={e=>setNewAction(a=>({...a,title:e.target.value}))} placeholder="Action item title..." style={{flex:"2 1 200px",padding:"6px 10px",borderRadius:6,border:`1px solid ${C.border}`,background:C.card2,color:C.bright,fontSize:11}}/>
+                      <select value={newAction.building||""} onChange={e=>setNewAction(a=>({...a,building:e.target.value,buildingId:ACTIVE.find(b=>b.name===e.target.value)?.id}))} style={{flex:"1 1 150px",padding:"6px 8px",borderRadius:6,border:`1px solid ${C.border}`,background:C.card2,color:C.text,fontSize:10}}>
+                        <option value="">Select Building...</option>
+                        {ACTIVE.map(b=><option key={b.id} value={b.name}>{b.name}</option>)}
+                      </select>
+                    </div>
+                    <div style={{display:"flex",gap:8,flexWrap:"wrap",alignItems:"center"}}>
+                      <select value={newAction.priority} onChange={e=>setNewAction(a=>({...a,priority:e.target.value}))} style={{padding:"6px 8px",borderRadius:6,border:`1px solid ${C.border}`,background:C.card2,color:C.text,fontSize:10}}>
+                        <option value="high">High Priority</option>
+                        <option value="medium">Medium Priority</option>
+                        <option value="low">Low Priority</option>
+                      </select>
+                      <select value={newAction.category} onChange={e=>setNewAction(a=>({...a,category:e.target.value}))} style={{padding:"6px 8px",borderRadius:6,border:`1px solid ${C.border}`,background:C.card2,color:C.text,fontSize:10}}>
+                        {["Audit","Benchmarking","BPS Filing","Incentive","Capital","Maintenance","General"].map(c=><option key={c} value={c}>{c}</option>)}
+                      </select>
+                      <input type="date" value={newAction.dueDate} onChange={e=>setNewAction(a=>({...a,dueDate:e.target.value}))} style={{padding:"6px 8px",borderRadius:6,border:`1px solid ${C.border}`,background:C.card2,color:C.text,fontSize:10}}/>
+                      <input value={newAction.assignee} onChange={e=>setNewAction(a=>({...a,assignee:e.target.value}))} placeholder="Assignee..." style={{padding:"6px 10px",borderRadius:6,border:`1px solid ${C.border}`,background:C.card2,color:C.bright,fontSize:10,width:120}}/>
+                      <div style={{marginLeft:"auto",display:"flex",gap:6}}>
+                        <button onClick={()=>setNewAction(null)} style={{padding:"5px 12px",borderRadius:6,fontSize:10,cursor:"pointer",border:`1px solid ${C.border}`,background:"transparent",color:C.muted}}>Cancel</button>
+                        <button onClick={()=>{if(newAction.title&&newAction.building)addActionItem(newAction);}} style={{padding:"5px 12px",borderRadius:6,fontSize:10,cursor:"pointer",border:`1px solid ${C.compliant}`,background:`${C.compliant}20`,color:C.compliant,fontWeight:700}}>Add Item</button>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                <div style={{display:"flex",flexDirection:"column",gap:3}}>
+                  {filteredActions.map(a=>{
+                    const daysLeft=dF(a.dueDate);
+                    const isOverdue=a.status!=="completed"&&daysLeft<0;
+                    const isOpen=expandedAction===a.id;
+                    return(
+                      <div key={a.id}>
+                        <div onClick={()=>setExpandedAction(isOpen?null:a.id)} style={{display:"flex",alignItems:"center",gap:8,padding:"8px 12px",background:isOpen?`${C.accent}08`:C.card2,borderRadius:isOpen?"6px 6px 0 0":6,border:`1px solid ${isOpen?C.accent:C.border}`,cursor:"pointer",transition:"all .15s"}}>
+                          <input type="checkbox" checked={a.status==="completed"} onChange={e=>{e.stopPropagation();updateActionItem(a.id,{status:a.status==="completed"?"open":"completed"});}} style={{cursor:"pointer",accentColor:C.compliant}}/>
+                          <span style={{padding:"2px 6px",borderRadius:4,fontSize:9,fontWeight:700,background:`${pColor[a.priority]}20`,color:pColor[a.priority],border:`1px solid ${pColor[a.priority]}40`,textTransform:"uppercase"}}>{a.priority}</span>
+                          <div style={{flex:1,fontWeight:600,color:a.status==="completed"?C.muted:C.bright,textDecoration:a.status==="completed"?"line-through":"none",fontSize:12}}>{a.title}</div>
+                          <span style={{padding:"2px 7px",borderRadius:4,fontSize:9,background:`${C.accent}15`,border:`1px solid ${C.accent}30`,color:C.accent}}>{a.category}</span>
+                          <div style={{fontSize:10,color:C.muted,width:90,textAlign:"right"}}>{a.building.split(" ").slice(0,2).join(" ")}</div>
+                          <div style={{fontSize:10,color:isOverdue?C.nonCompliant:daysLeft<=7?C.atRisk:C.muted,fontWeight:isOverdue?700:400,width:70,textAlign:"right"}}>{isOverdue?`${Math.abs(daysLeft)}d overdue`:a.status==="completed"?"Done":`${daysLeft}d left`}</div>
+                          <span style={{padding:"2px 7px",borderRadius:4,fontSize:9,fontWeight:600,background:`${sColor[a.status]}15`,color:sColor[a.status],border:`1px solid ${sColor[a.status]}40`}}>{a.status}</span>
+                          <div style={{fontSize:10,color:C.muted}}>{isOpen?"▲":"▼"}</div>
+                        </div>
+                        {isOpen&&(
+                          <div style={{background:`${C.accent}05`,border:`1px solid ${C.accent}`,borderTop:"none",borderRadius:"0 0 6px 6px",padding:"12px 14px"}}>
+                            <div style={{display:"flex",gap:16,flexWrap:"wrap",marginBottom:10}}>
+                              {[{label:"Building",value:a.building},{label:"Category",value:a.category},{label:"Assignee",value:a.assignee||"Unassigned"},{label:"Created",value:$dt(a.created)},{label:"Due Date",value:$dt(a.dueDate),color:isOverdue?C.nonCompliant:C.muted},{label:"Days Remaining",value:isOverdue?`${Math.abs(daysLeft)} OVERDUE`:a.status==="completed"?"Completed":`${daysLeft} days`,color:isOverdue?C.nonCompliant:daysLeft<=7?C.atRisk:C.compliant}].map(({label,value,color})=>(
+                                <div key={label} style={{minWidth:120}}>
+                                  <div style={{fontSize:9,color:C.muted,textTransform:"uppercase",letterSpacing:".4px",marginBottom:2}}>{label}</div>
+                                  <div style={{fontSize:12,fontWeight:600,color:color||C.bright}}>{value}</div>
+                                </div>
+                              ))}
+                            </div>
+                            <div style={{display:"flex",gap:6,marginTop:8}}>
+                              <span style={{fontSize:10,color:C.muted}}>Status:</span>
+                              {["open","in-progress","completed"].map(s=>(
+                                <button key={s} onClick={()=>updateActionItem(a.id,{status:s})} style={{padding:"3px 9px",borderRadius:4,fontSize:9,cursor:"pointer",border:`1px solid ${a.status===s?sColor[s]:C.border}`,background:a.status===s?`${sColor[s]}20`:"transparent",color:a.status===s?sColor[s]:C.muted,fontWeight:a.status===s?700:400}}>{s}</button>
+                              ))}
+                              <button onClick={()=>deleteActionItem(a.id)} style={{marginLeft:"auto",padding:"3px 9px",borderRadius:4,fontSize:9,cursor:"pointer",border:`1px solid ${C.nonCompliant}40`,background:`${C.nonCompliant}10`,color:C.nonCompliant}}>Delete</button>
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                  {filteredActions.length===0&&<div style={{padding:20,textAlign:"center",color:C.muted,fontSize:12}}>No action items match the current filters.</div>}
+                </div>
+
+                <div style={{marginTop:10,fontSize:10,color:C.muted,textAlign:"right"}}>{filteredActions.length} of {actionItems.length} items shown</div>
+              </Card>
+            </div>
+          );
+        })()}
+
+        {/* JURISDICTION MAP */}
+        {tab==="map" && (()=>{
+          const stateData={};
+          ACTIVE.forEach(b=>{
+            if(!stateData[b.state])stateData[b.state]={count:0,compliant:0,atRisk:0,nonCompliant:0,totalPen:0,totalSF:0,bpsCount:0,buildings:[]};
+            const sd=stateData[b.state];
+            sd.count++;sd.totalPen+=b.penalty;sd.totalSF+=b.sf;
+            if(b.bpsJuris)sd.bpsCount++;
+            if(b.status==="Compliant")sd.compliant++;
+            else if(b.status==="At-Risk")sd.atRisk++;
+            else sd.nonCompliant++;
+            sd.buildings.push(b);
+          });
+          const stateList=Object.entries(stateData).sort((a,b)=>b[1].count-a[1].count);
+          const [mapHover,setMapHover]=useState(null);
+          const [mapSelected,setMapSelected]=useState(null);
+          const jurisList=[...new Set(ACTIVE.filter(b=>b.juris&&b.juris!=="N/A").map(b=>b.juris))].sort();
+          const jurisData={};
+          ACTIVE.filter(b=>b.juris&&b.juris!=="N/A").forEach(b=>{
+            if(!jurisData[b.juris])jurisData[b.juris]={count:0,compliant:0,atRisk:0,nonCompliant:0,totalPen:0,totalSF:0};
+            const jd=jurisData[b.juris];
+            jd.count++;jd.totalPen+=b.penalty;jd.totalSF+=b.sf;
+            if(b.status==="Compliant")jd.compliant++;
+            else if(b.status==="At-Risk")jd.atRisk++;
+            else jd.nonCompliant++;
+          });
+
+          const selData=mapSelected?stateData[mapSelected]:null;
+          const stateColor=(st)=>{
+            const d=stateData[st];
+            if(!d)return C.border;
+            const ncPct=d.nonCompliant/d.count;
+            if(ncPct>0.4)return C.nonCompliant;
+            if(ncPct>0.15||d.atRisk/d.count>0.3)return C.atRisk;
+            return C.compliant;
+          };
+
+          return(
+            <div style={{display:"flex",flexDirection:"column",gap:12}}>
+              <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
+                <KpiCard label="States" value={stateList.length} sub="With portfolio assets" color={C.blue}/>
+                <KpiCard label="BPS Jurisdictions" value={jurisList.length} sub="Active programs" color={C.cyan}/>
+                <KpiCard label="Covered Buildings" value={ACTIVE.filter(b=>b.covered).length} sub="Subject to BPS" color={C.accent}/>
+                <KpiCard label="States w/ Penalties" value={stateList.filter(([,d])=>d.totalPen>0).length} sub="Non-zero exposure" color={C.nonCompliant}/>
+              </div>
+
+              <div style={{display:"flex",gap:12,flexWrap:"wrap"}}>
+                <Card style={{flex:"2 1 400px"}}>
+                  <div style={{fontSize:13,fontWeight:700,color:C.bright,marginBottom:4}}>Portfolio by State</div>
+                  <div style={{fontSize:10,color:C.muted,marginBottom:12}}>Click a state to drill down. Colors indicate compliance health.</div>
+
+                  <svg viewBox="0 0 900 600" style={{width:"100%",maxHeight:380}}>
+                    <rect width="900" height="600" fill={C.bg} rx="8"/>
+                    {Object.entries(US_STATES).map(([st,path])=>{
+                      const d=stateData[st];
+                      const fill=d?stateColor(st):`${C.border}60`;
+                      const isHov=mapHover===st;
+                      const isSel=mapSelected===st;
+                      return(
+                        <g key={st}>
+                          <path d={path} fill={isSel?`${C.accent}80`:isHov?`${fill}cc`:fill} stroke={isSel?C.accent:isHov?C.bright:`${C.border}`} strokeWidth={isSel?2.5:isHov?1.5:0.8} style={{cursor:d?"pointer":"default",transition:"all .15s"}} onMouseEnter={()=>setMapHover(st)} onMouseLeave={()=>setMapHover(null)} onClick={()=>d&&setMapSelected(mapSelected===st?null:st)}/>
+                          {d&&(
+                            <text x={parseInt(path.match(/M(\d+)/)?.[1]||0)+25} y={parseInt(path.match(/M\d+,(\d+)/)?.[1]||0)+30} fill={C.bright} fontSize="11" fontWeight="700" textAnchor="middle" pointerEvents="none">{st}</text>
+                          )}
+                        </g>
+                      );
+                    })}
+                    {mapHover&&stateData[mapHover]&&(
+                      <g>
+                        <rect x="620" y="20" width="260" height="80" rx="6" fill={C.card} stroke={C.border}/>
+                        <text x="635" y="42" fill={C.bright} fontSize="13" fontWeight="700">{mapHover} — {stateData[mapHover].count} buildings</text>
+                        <text x="635" y="58" fill={C.compliant} fontSize="10">{stateData[mapHover].compliant} compliant</text>
+                        <text x="735" y="58" fill={C.atRisk} fontSize="10">{stateData[mapHover].atRisk} at-risk</text>
+                        <text x="635" y="74" fill={C.nonCompliant} fontSize="10">{stateData[mapHover].nonCompliant} non-compliant</text>
+                        <text x="635" y="90" fill={C.muted} fontSize="10">Penalties: {$usd(stateData[mapHover].totalPen)}</text>
+                      </g>
+                    )}
+                    <g>
+                      {[{color:C.compliant,label:"Mostly Compliant"},{color:C.atRisk,label:"Mixed / At-Risk"},{color:C.nonCompliant,label:"High Non-Compliance"}].map(({color,label},i)=>(
+                        <g key={label}>
+                          <rect x={20+i*150} y={565} width={12} height={12} rx={2} fill={color}/>
+                          <text x={36+i*150} y={576} fill={C.muted} fontSize="10">{label}</text>
+                        </g>
+                      ))}
+                    </g>
+                  </svg>
+                </Card>
+
+                <Card style={{flex:"1 1 280px"}}>
+                  <div style={{fontSize:13,fontWeight:700,color:C.bright,marginBottom:8}}>BPS Programs by Jurisdiction</div>
+                  <div style={{display:"flex",flexDirection:"column",gap:4,maxHeight:400,overflowY:"auto"}}>
+                    {Object.entries(jurisData).sort((a,b)=>b[1].count-a[1].count).map(([juris,d])=>{
+                      const ncPct=Math.round(d.nonCompliant/d.count*100);
+                      return(
+                        <div key={juris} style={{padding:"8px 10px",background:C.card2,borderRadius:6,border:`1px solid ${C.border}`}}>
+                          <div style={{display:"flex",justifyContent:"space-between",marginBottom:4}}>
+                            <div style={{fontSize:11,fontWeight:700,color:C.cyan}}>{juris}</div>
+                            <div style={{fontSize:10,color:C.muted}}>{d.count} bldgs</div>
+                          </div>
+                          <div style={{display:"flex",gap:8,fontSize:9,marginBottom:4}}>
+                            <span style={{color:C.compliant}}>{d.compliant} OK</span>
+                            <span style={{color:C.atRisk}}>{d.atRisk} risk</span>
+                            <span style={{color:C.nonCompliant}}>{d.nonCompliant} NC</span>
+                          </div>
+                          <div style={{display:"flex",alignItems:"center",gap:6}}>
+                            <div style={{flex:1,height:4,background:C.border,borderRadius:2}}>
+                              <div style={{height:4,borderRadius:2,width:`${100-ncPct}%`,background:ncPct>40?C.nonCompliant:ncPct>15?C.atRisk:C.compliant}}/>
+                            </div>
+                            <span style={{fontSize:9,color:C.muted}}>{$usd(d.totalPen)}</span>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </Card>
+              </div>
+
+              {selData&&(
+                <Card style={{borderTop:`2px solid ${C.accent}`}}>
+                  <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:10}}>
+                    <div>
+                      <div style={{fontSize:14,fontWeight:700,color:C.accent}}>{mapSelected} — {selData.count} Buildings</div>
+                      <div style={{fontSize:11,color:C.muted,marginTop:2}}>{$n(selData.totalSF)} total SF · {selData.bpsCount} in BPS jurisdiction · {$usd(selData.totalPen)} penalty exposure</div>
+                    </div>
+                    <button onClick={()=>setMapSelected(null)} style={{padding:"4px 10px",borderRadius:6,fontSize:10,cursor:"pointer",border:`1px solid ${C.border}`,background:C.card2,color:C.muted}}>Close</button>
+                  </div>
+                  <div style={{overflowX:"auto",maxHeight:300}}>
+                    <table style={{width:"100%",borderCollapse:"collapse",fontSize:11}}>
+                      <thead>
+                        <tr>{["Building","City","Type","SF","Status","EUI","Target","E★","Jurisdiction","Penalty"].map(h=><th key={h} style={{padding:"6px 10px",textAlign:"left",color:C.muted,fontWeight:600,fontSize:10,borderBottom:`1px solid ${C.border}`,background:C.card2}}>{h}</th>)}</tr>
+                      </thead>
+                      <tbody>
+                        {selData.buildings.sort((a,b)=>b.penalty-a.penalty).map((b,i)=>(
+                          <tr key={b.id} style={{borderBottom:`1px solid ${C.border}`,background:i%2===0?"transparent":C.card2}}>
+                            <td style={{padding:"6px 10px",color:C.bright,fontWeight:600,whiteSpace:"nowrap"}}>{b.name}</td>
+                            <td style={{padding:"6px 10px",color:C.muted}}>{b.city}</td>
+                            <td style={{padding:"6px 10px",color:C.muted}}>{b.type}</td>
+                            <td style={{padding:"6px 10px",color:C.muted,textAlign:"right"}}>{$n(b.sf)}</td>
+                            <td style={{padding:"6px 10px"}}><span style={sBadge(b.status)}>{b.status}</span></td>
+                            <td style={{padding:"6px 10px",textAlign:"right",fontWeight:700,color:b.eui>b.target?C.nonCompliant:C.compliant}}>{b.eui??"—"}</td>
+                            <td style={{padding:"6px 10px",textAlign:"right",color:C.muted}}>{b.target??"—"}</td>
+                            <td style={{padding:"6px 10px",textAlign:"right",fontWeight:700,color:b.eStar>=75?C.compliant:b.eStar>=50?C.atRisk:C.nonCompliant}}>{b.eStar??"—"}</td>
+                            <td style={{padding:"6px 10px",color:C.cyan,fontSize:10}}>{b.juris}</td>
+                            <td style={{padding:"6px 10px",textAlign:"right",fontWeight:700,color:b.penalty>0?C.nonCompliant:C.compliant}}>{b.penalty>0?$usd(b.penalty):"—"}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </Card>
+              )}
+
+              <Card>
+                <div style={{fontSize:13,fontWeight:700,color:C.bright,marginBottom:8}}>State Compliance Summary</div>
+                <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(180px,1fr))",gap:6}}>
+                  {stateList.map(([st,d])=>{
+                    const compPct=Math.round(d.compliant/d.count*100);
+                    return(
+                      <div key={st} onClick={()=>setMapSelected(mapSelected===st?null:st)} style={{padding:"8px 10px",background:mapSelected===st?`${C.accent}12`:C.card2,borderRadius:6,border:`1px solid ${mapSelected===st?C.accent:C.border}`,cursor:"pointer",transition:"all .15s"}}>
+                        <div style={{display:"flex",justifyContent:"space-between",marginBottom:4}}>
+                          <span style={{fontSize:12,fontWeight:800,color:C.bright}}>{st}</span>
+                          <span style={{fontSize:10,color:C.muted}}>{d.count} bldgs</span>
+                        </div>
+                        <div style={{height:5,background:C.border,borderRadius:3,marginBottom:4}}>
+                          <div style={{height:5,borderRadius:3,width:`${compPct}%`,background:compPct>=70?C.compliant:compPct>=40?C.atRisk:C.nonCompliant}}/>
+                        </div>
+                        <div style={{display:"flex",justifyContent:"space-between",fontSize:9}}>
+                          <span style={{color:C.compliant}}>{d.compliant} OK</span>
+                          <span style={{color:d.totalPen>0?C.nonCompliant:C.muted}}>{d.totalPen>0?$usd(d.totalPen):"No penalties"}</span>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </Card>
+            </div>
+          );
+        })()}
+
+        {/* NOTES & ANNOTATIONS */}
+        {tab==="notes" && (()=>{
+          const allTags=["General","Compliance","Audit","Filing","Benchmarking","Incentive","Capital","Maintenance"];
+          const tagColor={General:C.muted,Compliance:C.accent,Audit:C.purple,Filing:C.cyan,Benchmarking:C.blue,Incentive:C.compliant,Capital:C.atRisk,Maintenance:C.orange};
+          const bldgsWithNotes=Object.keys(buildingNotes).map(Number).filter(id=>buildingNotes[id]?.length>0);
+          const totalNotes=Object.values(buildingNotes).reduce((a,b)=>a+(b?.length||0),0);
+          const noteBlds=ACTIVE.filter(b=>notesBldSearch?b.name.toLowerCase().includes(notesBldSearch.toLowerCase()):true);
+          const selBld=selectedNoteBld?ACTIVE.find(b=>b.id===selectedNoteBld):null;
+          const selNotes=(selectedNoteBld?buildingNotes[selectedNoteBld]:[])||[];
+          const filteredNotes=notesFilterTag==="all"?selNotes:selNotes.filter(n=>n.tag===notesFilterTag);
+
+          return(
+            <div style={{display:"flex",flexDirection:"column",gap:12}}>
+              <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
+                <KpiCard label="Total Notes" value={totalNotes} sub="Across portfolio" color={C.accent}/>
+                <KpiCard label="Buildings w/ Notes" value={bldgsWithNotes.length} sub={`of ${ACTIVE.length} active`} color={C.blue}/>
+                <KpiCard label="Tags Used" value={allTags.length} sub="Categories" color={C.purple}/>
+              </div>
+
+              <div style={{display:"flex",gap:12,minHeight:500}}>
+                {/* Building selector sidebar */}
+                <Card style={{width:260,flexShrink:0,display:"flex",flexDirection:"column",padding:0,overflow:"hidden"}}>
+                  <div style={{padding:"10px 12px",borderBottom:`1px solid ${C.border}`}}>
+                    <input value={notesBldSearch} onChange={e=>setNotesBldSearch(e.target.value)} placeholder="Search buildings..." style={{width:"100%",padding:"5px 8px",borderRadius:6,border:`1px solid ${C.border}`,background:C.card2,color:C.bright,fontSize:11,boxSizing:"border-box"}}/>
+                  </div>
+                  <div style={{flex:1,overflowY:"auto"}}>
+                    {noteBlds.map(b=>{
+                      const nc=(buildingNotes[b.id]||[]).length;
+                      const isSel=selectedNoteBld===b.id;
+                      return(
+                        <div key={b.id} onClick={()=>{setSelectedNoteBld(b.id);setNotesFilterTag("all");}} style={{display:"flex",alignItems:"center",gap:6,padding:"7px 12px",cursor:"pointer",background:isSel?`${C.accent}12`:"transparent",borderLeft:`3px solid ${isSel?C.accent:"transparent"}`,borderBottom:`1px solid ${C.border}`,transition:"all .1s"}}>
+                          <div style={{flex:1,overflow:"hidden"}}>
+                            <div style={{fontSize:11,fontWeight:isSel?700:500,color:isSel?C.bright:C.text,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{b.name}</div>
+                            <div style={{fontSize:9,color:C.muted}}>{b.city}, {b.state}</div>
+                          </div>
+                          {nc>0&&<span style={{padding:"1px 6px",borderRadius:10,fontSize:9,fontWeight:700,background:`${C.accent}20`,color:C.accent,border:`1px solid ${C.accent}30`}}>{nc}</span>}
+                        </div>
+                      );
+                    })}
+                  </div>
+                </Card>
+
+                {/* Notes panel */}
+                <div style={{flex:1,display:"flex",flexDirection:"column",gap:10}}>
+                  {selBld?(
+                    <>
+                      <Card style={{paddingBottom:10}}>
+                        <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:8}}>
+                          <div>
+                            <div style={{fontSize:14,fontWeight:700,color:C.bright}}>{selBld.name}</div>
+                            <div style={{fontSize:11,color:C.muted}}>{selBld.city}, {selBld.state} · {selBld.type} · {$n(selBld.sf)} SF · <span style={sBadge(selBld.status)}>{selBld.status}</span></div>
+                          </div>
+                          <div style={{textAlign:"right"}}>
+                            <div style={{fontSize:10,color:C.muted}}>EUI: <span style={{color:selBld.eui>selBld.target?C.nonCompliant:C.compliant,fontWeight:700}}>{selBld.eui}</span> / {selBld.target}</div>
+                            <div style={{fontSize:10,color:C.muted}}>Penalty: <span style={{color:selBld.penalty>0?C.nonCompliant:C.compliant,fontWeight:700}}>{selBld.penalty>0?$usd(selBld.penalty):"None"}</span></div>
+                          </div>
+                        </div>
+
+                        {/* Add note form */}
+                        <div style={{display:"flex",gap:6,alignItems:"flex-end"}}>
+                          <div style={{flex:1}}>
+                            <textarea value={newNoteText} onChange={e=>setNewNoteText(e.target.value)} placeholder="Add a note about this building..." rows={2} style={{width:"100%",padding:"6px 10px",borderRadius:6,border:`1px solid ${C.border}`,background:C.card2,color:C.bright,fontSize:11,resize:"vertical",boxSizing:"border-box",fontFamily:"inherit"}}/>
+                          </div>
+                          <select value={newNoteTag} onChange={e=>setNewNoteTag(e.target.value)} style={{padding:"6px 8px",borderRadius:6,border:`1px solid ${C.border}`,background:C.card2,color:C.text,fontSize:10}}>
+                            {allTags.map(t=><option key={t} value={t}>{t}</option>)}
+                          </select>
+                          <button onClick={()=>addNote(selBld.id)} style={{padding:"6px 14px",borderRadius:6,fontSize:10,cursor:"pointer",border:`1px solid ${C.accent}`,background:`${C.accent}20`,color:C.accent,fontWeight:700,whiteSpace:"nowrap"}}>Add Note</button>
+                        </div>
+                      </Card>
+
+                      <div style={{display:"flex",gap:4,alignItems:"center"}}>
+                        <span style={{fontSize:10,color:C.muted}}>Filter:</span>
+                        {["all",...allTags].map(t=>(
+                          <button key={t} onClick={()=>setNotesFilterTag(t)} style={{padding:"2px 8px",borderRadius:12,fontSize:9,cursor:"pointer",border:`1px solid ${notesFilterTag===t?(tagColor[t]||C.accent):C.border}`,background:notesFilterTag===t?`${tagColor[t]||C.accent}20`:"transparent",color:notesFilterTag===t?(tagColor[t]||C.accent):C.muted}}>{t==="all"?"All":t}</button>
+                        ))}
+                        <span style={{fontSize:10,color:C.muted,marginLeft:"auto"}}>{filteredNotes.length} note{filteredNotes.length!==1?"s":""}</span>
+                      </div>
+
+                      <div style={{display:"flex",flexDirection:"column",gap:6}}>
+                        {filteredNotes.map(n=>(
+                          <Card key={n.id} style={{borderLeft:`3px solid ${tagColor[n.tag]||C.muted}`}}>
+                            <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:6}}>
+                              <div style={{display:"flex",gap:6,alignItems:"center"}}>
+                                <span style={{padding:"1px 7px",borderRadius:10,fontSize:9,fontWeight:600,background:`${tagColor[n.tag]||C.muted}20`,color:tagColor[n.tag]||C.muted,border:`1px solid ${tagColor[n.tag]||C.muted}30`}}>{n.tag}</span>
+                                <span style={{fontSize:10,color:C.muted}}>{n.author}</span>
+                                <span style={{fontSize:10,color:C.muted}}>· {$dt(n.ts)}</span>
+                              </div>
+                              <button onClick={()=>deleteNote(selBld.id,n.id)} style={{padding:"2px 6px",borderRadius:4,fontSize:9,cursor:"pointer",border:`1px solid ${C.border}`,background:"transparent",color:C.muted}}>x</button>
+                            </div>
+                            <div style={{fontSize:12,color:C.text,lineHeight:1.5}}>{n.text}</div>
+                          </Card>
+                        ))}
+                        {filteredNotes.length===0&&<div style={{padding:20,textAlign:"center",color:C.muted,fontSize:12}}>No notes {notesFilterTag!=="all"?`with tag "${notesFilterTag}" `:""}for this building yet.</div>}
+                      </div>
+                    </>
+                  ):(
+                    <Card style={{flex:1,display:"flex",alignItems:"center",justifyContent:"center"}}>
+                      <div style={{textAlign:"center",color:C.muted}}>
+                        <div style={{fontSize:32,marginBottom:8}}>✎</div>
+                        <div style={{fontSize:13,fontWeight:600}}>Select a building</div>
+                        <div style={{fontSize:11,marginTop:4}}>Choose a building from the list to view and add notes</div>
+                      </div>
+                    </Card>
+                  )}
+                </div>
+              </div>
+            </div>
+          );
+        })()}
+
+        {/* ENERGY STAR PORTFOLIO MANAGER */}
+        {tab==="energystar" && (()=>{
+          const espmBuildings=ACTIVE.map(b=>{
+            const override=espmScoreOverrides[b.id];
+            return{...b,pmScore:override?.pmScore||null,pmStatus:override?.status||"not-synced",pmPropertyId:override?.propertyId||null,pmLastSync:override?.lastSync||null,scoreDiff:override?override.pmScore-b.eStar:null};
+          });
+          const syncedCount=espmBuildings.filter(b=>b.pmStatus==="synced").length;
+          const avgPmScore=syncedCount?Math.round(espmBuildings.filter(b=>b.pmScore).reduce((a,b)=>a+b.pmScore,0)/syncedCount):0;
+          const certEligible=espmBuildings.filter(b=>b.pmScore&&b.pmScore>=75).length;
+          const filteredEspm=espmFilterScore==="all"?espmBuildings:espmFilterScore==="eligible"?espmBuildings.filter(b=>b.pmScore>=75):espmFilterScore==="below"?espmBuildings.filter(b=>b.pmScore&&b.pmScore<50):espmBuildings;
+
+          return(
+            <div style={{display:"flex",flexDirection:"column",gap:12}}>
+              <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
+                <KpiCard label="Connection" value={espmConnected?"Connected":"Not Connected"} sub={espmConnected?"API linked":"Set up below"} color={espmConnected?C.compliant:C.muted}/>
+                <KpiCard label="Properties Synced" value={syncedCount} sub={`of ${ACTIVE.length} buildings`} color={syncedCount>0?C.blue:C.muted}/>
+                <KpiCard label="Avg PM Score" value={avgPmScore||"—"} sub="Portfolio Manager" color={avgPmScore>=75?C.compliant:avgPmScore>=50?C.atRisk:avgPmScore?C.nonCompliant:C.muted}/>
+                <KpiCard label="Cert Eligible" value={certEligible} sub="Score >= 75" color={C.compliant}/>
+                <KpiCard label="Last Sync" value={espmLastSync?$dt(espmLastSync):"Never"} sub={espmSyncing?"Syncing...":"Ready"} color={espmLastSync?C.cyan:C.muted}/>
+              </div>
+
+              <Card>
+                <div style={{fontSize:13,fontWeight:700,color:C.bright,marginBottom:4}}>ENERGY STAR Portfolio Manager Integration</div>
+                <div style={{fontSize:11,color:C.muted,marginBottom:14}}>Connect to EPA's Portfolio Manager to sync ENERGY STAR scores, benchmarking data, and certification status.</div>
+
+                <div style={{display:"flex",gap:12,flexWrap:"wrap",marginBottom:14}}>
+                  <div style={{flex:"1 1 300px",padding:14,background:C.card2,borderRadius:8,border:`1px solid ${C.border}`}}>
+                    <div style={{fontSize:11,fontWeight:700,color:C.bright,marginBottom:8}}>API Configuration</div>
+                    <div style={{display:"flex",flexDirection:"column",gap:8}}>
+                      <div>
+                        <div style={{fontSize:10,color:C.muted,marginBottom:3}}>Portfolio Manager API Key</div>
+                        <div style={{display:"flex",gap:6}}>
+                          <input type="password" value={espmApiKey} onChange={e=>setEspmApiKey(e.target.value)} placeholder="Enter PM API key..." style={{flex:1,padding:"6px 10px",borderRadius:6,border:`1px solid ${C.border}`,background:C.bg,color:C.bright,fontSize:11}}/>
+                        </div>
+                      </div>
+                      <div>
+                        <div style={{fontSize:10,color:C.muted,marginBottom:3}}>Connection Status</div>
+                        <div style={{display:"flex",alignItems:"center",gap:6}}>
+                          <div style={{width:8,height:8,borderRadius:"50%",background:espmConnected?C.compliant:C.muted}}/>
+                          <span style={{fontSize:11,color:espmConnected?C.compliant:C.muted,fontWeight:600}}>{espmConnected?"Connected to Portfolio Manager":"Not connected"}</span>
+                        </div>
+                      </div>
+                      <button onClick={espmSimulateSync} disabled={espmSyncing} style={{padding:"8px 16px",borderRadius:6,fontSize:11,cursor:espmSyncing?"not-allowed":"pointer",border:`1px solid ${espmSyncing?C.muted:C.accent}`,background:espmSyncing?C.card2:`${C.accent}20`,color:espmSyncing?C.muted:C.accent,fontWeight:700}}>
+                        {espmSyncing?"Syncing...":espmConnected?"Re-sync All Properties":"Connect & Sync"}
+                      </button>
+                    </div>
+                  </div>
+
+                  <div style={{flex:"1 1 300px",padding:14,background:C.card2,borderRadius:8,border:`1px solid ${C.border}`}}>
+                    <div style={{fontSize:11,fontWeight:700,color:C.bright,marginBottom:8}}>Sync Summary</div>
+                    <div style={{display:"flex",flexDirection:"column",gap:6}}>
+                      {[{label:"Properties Matched",value:`${syncedCount} / ${ACTIVE.length}`,color:syncedCount>0?C.compliant:C.muted},{label:"Score Discrepancies",value:espmBuildings.filter(b=>b.scoreDiff&&Math.abs(b.scoreDiff)>5).length,color:C.atRisk},{label:"Certification Eligible",value:certEligible,color:C.compliant},{label:"Below Threshold (<50)",value:espmBuildings.filter(b=>b.pmScore&&b.pmScore<50).length,color:C.nonCompliant}].map(({label,value,color})=>(
+                        <div key={label} style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+                          <span style={{fontSize:11,color:C.muted}}>{label}</span>
+                          <span style={{fontSize:12,fontWeight:700,color}}>{value}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+
+                {espmConnected&&(
+                  <div style={{marginBottom:12}}>
+                    <div style={{fontSize:12,fontWeight:700,color:C.bright,marginBottom:8}}>Score Comparison: Dashboard vs. Portfolio Manager</div>
+                    <ResponsiveContainer width="100%" height={200}>
+                      <BarChart data={espmBuildings.filter(b=>b.pmScore).slice(0,20).map(b=>({name:b.name.split(" ").slice(0,2).join(" "),Dashboard:b.eStar,PM:b.pmScore}))} margin={{top:0,right:10,bottom:26,left:0}}>
+                        <CartesianGrid strokeDasharray="3 3" stroke={C.border}/>
+                        <XAxis dataKey="name" tick={{fill:C.muted,fontSize:8}} angle={-35} textAnchor="end" interval={0}/>
+                        <YAxis tick={{fill:C.muted,fontSize:10}} domain={[0,100]}/>
+                        <Tooltip {...tt}/>
+                        <Legend wrapperStyle={{fontSize:11}}/>
+                        <Bar dataKey="Dashboard" fill={C.accent} radius={[2,2,0,0]}/>
+                        <Bar dataKey="PM" fill={C.cyan} radius={[2,2,0,0]}/>
+                      </BarChart>
+                    </ResponsiveContainer>
+                  </div>
+                )}
+              </Card>
+
+              {espmConnected&&(
+                <Card>
+                  <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",flexWrap:"wrap",gap:8,marginBottom:12}}>
+                    <div>
+                      <div style={{fontSize:13,fontWeight:700,color:C.bright}}>Synced Properties</div>
+                      <div style={{fontSize:10,color:C.muted,marginTop:2}}>ENERGY STAR scores from Portfolio Manager vs. internal dashboard scores</div>
+                    </div>
+                    <div style={{display:"flex",gap:6}}>
+                      {[{v:"all",l:"All"},{v:"eligible",l:"Cert Eligible (75+)"},{v:"below",l:"Below 50"}].map(({v,l})=>(
+                        <button key={v} onClick={()=>setEspmFilterScore(v)} style={{padding:"3px 10px",borderRadius:20,fontSize:10,cursor:"pointer",border:`1px solid ${espmFilterScore===v?C.accent:C.border}`,background:espmFilterScore===v?`${C.accent}20`:"transparent",color:espmFilterScore===v?C.accent:C.muted}}>{l}</button>
+                      ))}
+                    </div>
+                  </div>
+
+                  <div style={{overflowX:"auto",maxHeight:400}}>
+                    <table style={{width:"100%",borderCollapse:"collapse",fontSize:11}}>
+                      <thead>
+                        <tr>{["Building","City","ST","Type","PM Property ID","Dashboard Score","PM Score","Diff","Status","Cert Eligible"].map(h=><th key={h} style={{padding:"7px 10px",textAlign:"left",color:C.muted,fontWeight:600,fontSize:10,borderBottom:`1px solid ${C.border}`,background:C.card2,whiteSpace:"nowrap"}}>{h}</th>)}</tr>
+                      </thead>
+                      <tbody>
+                        {filteredEspm.map((b,i)=>{
+                          const sc=b.pmScore?b.pmScore>=75?C.compliant:b.pmScore>=50?C.atRisk:C.nonCompliant:C.muted;
+                          const diffColor=b.scoreDiff?b.scoreDiff>0?C.compliant:b.scoreDiff<-5?C.nonCompliant:C.atRisk:C.muted;
+                          return(
+                            <tr key={b.id} style={{borderBottom:`1px solid ${C.border}`,background:i%2===0?"transparent":C.card2}}>
+                              <td style={{padding:"6px 10px",color:C.bright,fontWeight:600,whiteSpace:"nowrap"}}>{b.name}</td>
+                              <td style={{padding:"6px 10px",color:C.muted}}>{b.city}</td>
+                              <td style={{padding:"6px 10px",color:C.muted}}>{b.state}</td>
+                              <td style={{padding:"6px 10px",color:C.muted}}>{b.type}</td>
+                              <td style={{padding:"6px 10px",color:C.cyan,fontSize:10}}>{b.pmPropertyId||"—"}</td>
+                              <td style={{padding:"6px 10px",textAlign:"center"}}>
+                                <span style={{fontWeight:700,color:b.eStar>=75?C.compliant:b.eStar>=50?C.atRisk:C.nonCompliant}}>{b.eStar}</span>
+                              </td>
+                              <td style={{padding:"6px 10px",textAlign:"center"}}>
+                                <span style={{fontWeight:700,color:sc}}>{b.pmScore||"—"}</span>
+                              </td>
+                              <td style={{padding:"6px 10px",textAlign:"center",fontWeight:700,color:diffColor}}>
+                                {b.scoreDiff!=null?(b.scoreDiff>0?"+":"")+b.scoreDiff:"—"}
+                              </td>
+                              <td style={{padding:"6px 10px"}}>
+                                <span style={{padding:"2px 7px",borderRadius:4,fontSize:9,fontWeight:600,background:b.pmStatus==="synced"?`${C.compliant}15`:`${C.muted}15`,color:b.pmStatus==="synced"?C.compliant:C.muted,border:`1px solid ${b.pmStatus==="synced"?C.compliant:C.muted}40`}}>{b.pmStatus}</span>
+                              </td>
+                              <td style={{padding:"6px 10px",textAlign:"center",color:b.pmScore&&b.pmScore>=75?C.compliant:C.muted,fontWeight:600}}>
+                                {b.pmScore&&b.pmScore>=75?"Yes":"No"}
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                  <div style={{marginTop:8,fontSize:10,color:C.muted,textAlign:"right"}}>
+                    {filteredEspm.length} properties · Avg PM score: <span style={{color:C.purple,fontWeight:700}}>{avgPmScore}</span> · {certEligible} certification eligible
+                  </div>
+                </Card>
+              )}
+            </div>
+          );
+        })()}
+      </div>
+    </div>
+  );
+}
