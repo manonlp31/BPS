@@ -1,4 +1,4 @@
-import { useState, useMemo } from "react";
+import { useState, useMemo, useCallback, useRef } from "react";
 import { BarChart, Bar, LineChart, Line, PieChart, Pie, Cell, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend } from "recharts";
 
 const C={compliant:"#22c55e",atRisk:"#f59e0b",nonCompliant:"#ef4444",accent:"#818cf8",blue:"#60a5fa",cyan:"#22d3ee",purple:"#c084fc",teal:"#2dd4bf",orange:"#fb923c",bg:"#07101f",card:"#0d1626",card2:"#111e30",border:"#1a2840",text:"#d1d9e6",muted:"#4a6080",bright:"#f0f4ff"};
@@ -509,6 +509,54 @@ export default function Dashboard(){
   const [kpiModal,setKpiModal]=useState(null);
   const [kpiSort,setKpiSort]=useState({});
 
+  // Data Import state
+  const [importData,setImportData]=useState(null);
+  const [importPreview,setImportPreview]=useState([]);
+  const [importMode,setImportMode]=useState("merge");
+  const [importStatus,setImportStatus]=useState(null);
+  const [importHistory,setImportHistory]=useState([]);
+  const fileRef=useRef(null);
+
+  // Action Items state
+  const [actionItems,setActionItems]=useState(()=>{
+    // Seed some demo action items
+    const seeds=[];
+    ACTIVE.filter(b=>b.status==="Non-Compliant").slice(0,8).forEach((b,i)=>{
+      seeds.push({id:Date.now()+i,buildingId:b.id,building:b.name,title:`Schedule energy audit for ${b.name}`,priority:i<3?"high":"medium",status:"open",category:"Audit",dueDate:addD(14+i*7),created:addD(-10-i*3),assignee:["J. Martinez","S. Chen","A. Patel","R. Kim"][i%4],notes:""});
+    });
+    ACTIVE.filter(b=>b.status==="At-Risk").slice(0,5).forEach((b,i)=>{
+      seeds.push({id:Date.now()+100+i,buildingId:b.id,building:b.name,title:`Submit benchmarking report — ${b.name}`,priority:i<2?"high":"low",status:i<2?"in-progress":"open",category:"Benchmarking",dueDate:addD(30+i*14),created:addD(-5-i*2),assignee:["M. Johnson","L. Wang","D. Smith"][i%3],notes:""});
+    });
+    ACTIVE.filter(b=>b.bpsJuris&&b.penalty>0).slice(0,4).forEach((b,i)=>{
+      seeds.push({id:Date.now()+200+i,buildingId:b.id,building:b.name,title:`Apply for ${b.incentives[0]||"incentive program"}`,priority:"medium",status:i===0?"completed":"open",category:"Incentive",dueDate:addD(60+i*20),created:addD(-15),assignee:["J. Martinez","A. Patel"][i%2],notes:""});
+    });
+    return seeds;
+  });
+  const [actionFilter,setActionFilter]=useState({status:"all",priority:"all",category:"all",building:""});
+  const [newAction,setNewAction]=useState(null);
+  const [expandedAction,setExpandedAction]=useState(null);
+
+  // Notes state
+  const [buildingNotes,setBuildingNotes]=useState(()=>{
+    const seeds={};
+    [{bid:48,notes:[{id:1,text:"BERDO 2.0 compliance deadline approaching. Need to schedule retro-commissioning assessment.",tag:"Compliance",ts:addD(-12),author:"J. Martinez"},{id:2,text:"Received MassSave rebate pre-approval for $85K. Need to finalize scope of work.",tag:"Incentive",ts:addD(-5),author:"S. Chen"}]},{bid:50,notes:[{id:3,text:"LA EBO filing submitted. Awaiting confirmation from LADBS.",tag:"Filing",ts:addD(-8),author:"A. Patel"}]},{bid:89,notes:[{id:4,text:"Chicago EBO audit scheduled for April 15. Contractor confirmed.",tag:"Audit",ts:addD(-3),author:"R. Kim"}]},{bid:42,notes:[{id:5,text:"NJ benchmarking report completed and submitted via Portfolio Manager.",tag:"Benchmarking",ts:addD(-18),author:"M. Johnson"},{id:6,text:"Building envelope assessment identified significant air leakage. Recommend sealing by Q3.",tag:"Capital",ts:addD(-2),author:"L. Wang"}]}].forEach(({bid,notes})=>{seeds[bid]=notes;});
+    return seeds;
+  });
+  const [notesBldSearch,setNotesBldSearch]=useState("");
+  const [selectedNoteBld,setSelectedNoteBld]=useState(null);
+  const [newNoteText,setNewNoteText]=useState("");
+  const [newNoteTag,setNewNoteTag]=useState("General");
+  const [notesFilterTag,setNotesFilterTag]=useState("all");
+
+  // ENERGY STAR PM state
+  const [espmConnected,setEspmConnected]=useState(false);
+  const [espmApiKey,setEspmApiKey]=useState("");
+  const [espmSyncing,setEspmSyncing]=useState(false);
+  const [espmLastSync,setEspmLastSync]=useState(null);
+  const [espmScoreOverrides,setEspmScoreOverrides]=useState({});
+  const [espmSelectedBld,setEspmSelectedBld]=useState(null);
+  const [espmFilterScore,setEspmFilterScore]=useState("all");
+
   const stats=useMemo(()=>{
     const n=ACTIVE.length;
     const comp=ACTIVE.filter(b=>b.status==="Compliant").length;
@@ -568,7 +616,88 @@ export default function Dashboard(){
 
   const bandDefs=[{label:"Overdue",color:C.nonCompliant,fn:d=>d<0},{label:"≤ 30 Days",color:C.nonCompliant,fn:d=>d>=0&&d<=30},{label:"31–60 Days",color:C.atRisk,fn:d=>d>30&&d<=60},{label:"61–90 Days",color:"#eab308",fn:d=>d>60&&d<=90},{label:"90+ Days",color:C.compliant,fn:d=>d>90}];
 
-  const nav=[{id:"overview",icon:"◈",label:"Overview"},{id:"analytics",icon:"↗",label:"Analytics"},{id:"buildings",icon:"⊞",label:"Buildings"},{id:"compliance",icon:"⚠",label:"Compliance"},{id:"incentives",icon:"✦",label:"Incentives"}];
+  const nav=[{id:"overview",icon:"◈",label:"Overview"},{id:"analytics",icon:"↗",label:"Analytics"},{id:"buildings",icon:"⊞",label:"Buildings"},{id:"compliance",icon:"⚠",label:"Compliance"},{id:"incentives",icon:"✦",label:"Incentives"},{id:"import",icon:"↥",label:"Data Import"},{id:"actions",icon:"☐",label:"Action Items"},{id:"map",icon:"◎",label:"Jurisdiction Map"},{id:"notes",icon:"✎",label:"Notes"},{id:"energystar",icon:"★",label:"ENERGY STAR PM"}];
+
+  // Data Import handlers
+  const handleFileUpload=useCallback((e)=>{
+    const file=e.target.files[0];
+    if(!file)return;
+    const reader=new FileReader();
+    reader.onload=(ev)=>{
+      try{
+        const text=ev.target.result;
+        let parsed=[];
+        if(file.name.endsWith(".json")){
+          const json=JSON.parse(text);
+          parsed=Array.isArray(json)?json:json.buildings||json.data||[];
+        }else{
+          const lines=text.split("\n").filter(l=>l.trim());
+          if(lines.length<2){setImportStatus({type:"error",msg:"CSV must have a header row and at least one data row."});return;}
+          const headers=lines[0].split(",").map(h=>h.trim().toLowerCase().replace(/[^a-z0-9]/g,""));
+          parsed=lines.slice(1).map(line=>{
+            const vals=line.split(",").map(v=>v.trim());
+            const obj={};
+            headers.forEach((h,i)=>{obj[h]=vals[i]||"";});
+            return obj;
+          });
+        }
+        setImportPreview(parsed.slice(0,20));
+        setImportData(parsed);
+        setImportStatus({type:"success",msg:`Parsed ${parsed.length} records from ${file.name}`});
+      }catch(err){setImportStatus({type:"error",msg:`Parse error: ${err.message}`});}
+    };
+    reader.readAsText(file);
+  },[]);
+
+  const confirmImport=useCallback(()=>{
+    if(!importData||!importData.length)return;
+    const ts=new Date().toISOString();
+    setImportHistory(h=>[{date:ts,file:`${importData.length} records`,mode:importMode,count:importData.length},...h]);
+    setImportStatus({type:"success",msg:`${importMode==="merge"?"Merged":"Replaced"} ${importData.length} records successfully. (Demo mode — data shown in preview only)`});
+    setImportData(null);
+    setImportPreview([]);
+  },[importData,importMode]);
+
+  // Action Item helpers
+  const addActionItem=(item)=>{
+    setActionItems(prev=>[{...item,id:Date.now(),created:NOW.toISOString().split("T")[0],status:"open"},...prev]);
+    setNewAction(null);
+  };
+  const updateActionItem=(id,updates)=>{
+    setActionItems(prev=>prev.map(a=>a.id===id?{...a,...updates}:a));
+  };
+  const deleteActionItem=(id)=>{
+    setActionItems(prev=>prev.filter(a=>a.id!==id));
+  };
+
+  // Notes helpers
+  const addNote=(bldId)=>{
+    if(!newNoteText.trim())return;
+    setBuildingNotes(prev=>({...prev,[bldId]:[{id:Date.now(),text:newNoteText.trim(),tag:newNoteTag,ts:NOW.toISOString().split("T")[0],author:"Current User"},...(prev[bldId]||[])]}));
+    setNewNoteText("");
+  };
+  const deleteNote=(bldId,noteId)=>{
+    setBuildingNotes(prev=>({...prev,[bldId]:(prev[bldId]||[]).filter(n=>n.id!==noteId)}));
+  };
+
+  // ENERGY STAR PM helpers
+  const espmSimulateSync=()=>{
+    setEspmSyncing(true);
+    setTimeout(()=>{
+      const overrides={};
+      ACTIVE.forEach(b=>{
+        const drift=Math.round((hv(b.id*7)-0.5)*12);
+        overrides[b.id]={pmScore:Math.max(1,Math.min(99,b.eStar+drift)),lastSync:NOW.toISOString().split("T")[0],propertyId:100000+b.id,status:"synced"};
+      });
+      setEspmScoreOverrides(overrides);
+      setEspmSyncing(false);
+      setEspmLastSync(NOW.toISOString().split("T")[0]);
+      setEspmConnected(true);
+    },1500);
+  };
+
+  // US state paths for the jurisdiction map (simplified)
+  const US_STATES={AL:"M575,440 L570,490 L615,495 L618,440Z",AZ:"M175,390 L160,480 L235,490 L250,385Z",CA:"M90,260 L70,420 L145,450 L155,280Z",CO:"M250,300 L245,370 L330,375 L335,305Z",CT:"M785,210 L775,225 L795,230 L800,215Z",DC:"M725,305 L720,315 L730,318 L733,308Z",DE:"M740,295 L735,315 L750,318 L752,298Z",FL:"M620,470 L600,540 L675,545 L700,480Z",GA:"M620,400 L610,460 L665,465 L670,405Z",HI:"M270,530 L260,555 L295,558 L300,535Z",IL:"M535,250 L525,350 L565,355 L572,255Z",IN:"M575,260 L568,340 L605,345 L610,265Z",MA:"M790,190 L780,210 L810,215 L815,195Z",MD:"M700,295 L690,320 L735,325 L740,300Z",MN:"M460,130 L450,230 L510,235 L515,135Z",NC:"M630,370 L620,400 L720,405 L725,375Z",NJ:"M755,240 L745,290 L770,295 L775,245Z",NV:"M140,250 L130,380 L190,385 L200,255Z",NY:"M710,160 L700,235 L770,240 L775,165Z",OH:"M610,245 L600,315 L650,320 L655,250Z",OR:"M90,160 L80,240 L160,245 L165,165Z",PA:"M680,230 L670,290 L740,295 L745,235Z",TN:"M560,370 L550,400 L640,405 L645,375Z",TX:"M320,400 L300,530 L440,540 L450,410Z",VA:"M670,320 L660,370 L740,375 L745,325Z",WA:"M100,100 L90,170 L170,175 L175,105Z"};
 
   function sortTh(col){if(sortCol===col)setSortDir(d=>d==="asc"?"desc":"asc");else{setSortCol(col);setSortDir("asc");}setPage(0);}
   const th=(col,label)=>(
@@ -1307,6 +1436,689 @@ export default function Dashboard(){
             </div>
           </div>
         )}
+
+        {/* DATA IMPORT */}
+        {tab==="import" && (
+          <div style={{display:"flex",flexDirection:"column",gap:12}}>
+            <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
+              <KpiCard label="Current Assets" value={BUILDINGS.length} sub="In portfolio" color={C.blue}/>
+              <KpiCard label="Active Buildings" value={ACTIVE.length} sub="Non-land, SF > 0" color={C.cyan}/>
+              <KpiCard label="States Covered" value={allStates.length} sub="Jurisdictions" color={C.purple}/>
+              <KpiCard label="Import History" value={importHistory.length} sub="Total imports" color={C.accent}/>
+            </div>
+
+            <Card>
+              <div style={{fontSize:13,fontWeight:700,color:C.bright,marginBottom:4}}>Upload Building Data</div>
+              <div style={{fontSize:11,color:C.muted,marginBottom:14}}>Import building data from CSV or JSON files. Supports columns: id, name, city, state, type, sf (square footage).</div>
+
+              <div style={{display:"flex",gap:12,alignItems:"flex-start",flexWrap:"wrap",marginBottom:14}}>
+                <div style={{flex:"1 1 300px"}}>
+                  <div style={{border:`2px dashed ${C.border}`,borderRadius:10,padding:"28px 20px",textAlign:"center",cursor:"pointer",background:C.card2,transition:"border-color .15s"}} onClick={()=>fileRef.current?.click()}>
+                    <div style={{fontSize:28,marginBottom:8,color:C.accent}}>↥</div>
+                    <div style={{fontSize:12,fontWeight:600,color:C.bright,marginBottom:4}}>Click to upload CSV or JSON</div>
+                    <div style={{fontSize:10,color:C.muted}}>Drag & drop also supported</div>
+                    <input ref={fileRef} type="file" accept=".csv,.json" onChange={handleFileUpload} style={{display:"none"}}/>
+                  </div>
+                </div>
+
+                <div style={{flex:"1 1 250px"}}>
+                  <div style={{fontSize:11,fontWeight:600,color:C.muted,marginBottom:6,textTransform:"uppercase",letterSpacing:".4px"}}>Import Mode</div>
+                  <div style={{display:"flex",gap:6,marginBottom:12}}>
+                    {["merge","replace"].map(m=>(
+                      <button key={m} onClick={()=>setImportMode(m)} style={{padding:"6px 16px",borderRadius:6,fontSize:11,cursor:"pointer",border:`1px solid ${importMode===m?C.accent:C.border}`,background:importMode===m?`${C.accent}20`:"transparent",color:importMode===m?C.accent:C.muted,fontWeight:importMode===m?700:400}}>
+                        {m==="merge"?"Merge (Add/Update)":"Replace All"}
+                      </button>
+                    ))}
+                  </div>
+
+                  <div style={{fontSize:11,fontWeight:600,color:C.muted,marginBottom:6,textTransform:"uppercase",letterSpacing:".4px"}}>Expected Format</div>
+                  <div style={{background:C.card2,borderRadius:6,padding:"8px 12px",border:`1px solid ${C.border}`,fontSize:10,fontFamily:"monospace",color:C.text,lineHeight:1.6}}>
+                    <div style={{color:C.cyan}}>CSV:</div>
+                    <div>id,name,city,state,type,sf</div>
+                    <div>139,New Building,Boston,MA,Office,85000</div>
+                    <div style={{color:C.cyan,marginTop:6}}>JSON:</div>
+                    <div>{"[{\"id\":139,\"name\":\"...\",\"sf\":85000}]"}</div>
+                  </div>
+                </div>
+              </div>
+
+              {importStatus&&(
+                <div style={{padding:"8px 14px",borderRadius:6,marginBottom:12,background:importStatus.type==="error"?`${C.nonCompliant}15`:`${C.compliant}15`,border:`1px solid ${importStatus.type==="error"?C.nonCompliant:C.compliant}40`,color:importStatus.type==="error"?C.nonCompliant:C.compliant,fontSize:11,fontWeight:600}}>
+                  {importStatus.type==="error"?"Error: ":"Success: "}{importStatus.msg}
+                </div>
+              )}
+
+              {importPreview.length>0&&(
+                <div>
+                  <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8}}>
+                    <div style={{fontSize:12,fontWeight:700,color:C.bright}}>Preview ({importData?.length} records, showing first {importPreview.length})</div>
+                    <div style={{display:"flex",gap:6}}>
+                      <button onClick={()=>{setImportData(null);setImportPreview([]);setImportStatus(null);}} style={{padding:"5px 14px",borderRadius:6,fontSize:11,cursor:"pointer",border:`1px solid ${C.border}`,background:"transparent",color:C.muted}}>Cancel</button>
+                      <button onClick={confirmImport} style={{padding:"5px 14px",borderRadius:6,fontSize:11,cursor:"pointer",border:`1px solid ${C.compliant}`,background:`${C.compliant}20`,color:C.compliant,fontWeight:700}}>Confirm {importMode==="merge"?"Merge":"Replace"}</button>
+                    </div>
+                  </div>
+                  <div style={{overflowX:"auto",maxHeight:300}}>
+                    <table style={{width:"100%",borderCollapse:"collapse",fontSize:10}}>
+                      <thead>
+                        <tr>{Object.keys(importPreview[0]).map(k=><th key={k} style={{padding:"6px 8px",textAlign:"left",color:C.muted,fontWeight:600,borderBottom:`1px solid ${C.border}`,background:C.card2,whiteSpace:"nowrap"}}>{k}</th>)}</tr>
+                      </thead>
+                      <tbody>
+                        {importPreview.map((row,i)=>(
+                          <tr key={i} style={{borderBottom:`1px solid ${C.border}`,background:i%2===0?"transparent":C.card2}}>
+                            {Object.values(row).map((v,j)=><td key={j} style={{padding:"5px 8px",color:C.text,whiteSpace:"nowrap"}}>{String(v)}</td>)}
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              )}
+            </Card>
+
+            {importHistory.length>0&&(
+              <Card>
+                <div style={{fontSize:13,fontWeight:700,color:C.bright,marginBottom:8}}>Import History</div>
+                <div style={{display:"flex",flexDirection:"column",gap:4}}>
+                  {importHistory.map((h,i)=>(
+                    <div key={i} style={{display:"flex",alignItems:"center",gap:10,padding:"7px 12px",background:C.card2,borderRadius:5,border:`1px solid ${C.border}`}}>
+                      <div style={{fontSize:10,color:C.muted,width:130}}>{$dt(h.date)}</div>
+                      <div style={{fontSize:11,color:C.bright,fontWeight:600,flex:1}}>{h.count} records</div>
+                      <span style={{padding:"2px 8px",borderRadius:4,fontSize:10,background:h.mode==="merge"?`${C.accent}20`:`${C.atRisk}20`,color:h.mode==="merge"?C.accent:C.atRisk,border:`1px solid ${h.mode==="merge"?C.accent:C.atRisk}40`}}>{h.mode}</span>
+                    </div>
+                  ))}
+                </div>
+              </Card>
+            )}
+
+            <Card>
+              <div style={{fontSize:13,fontWeight:700,color:C.bright,marginBottom:4}}>Current Portfolio Summary</div>
+              <div style={{fontSize:11,color:C.muted,marginBottom:10}}>Breakdown of currently loaded building data by type and state.</div>
+              <div style={{display:"flex",gap:16,flexWrap:"wrap"}}>
+                <div style={{flex:"1 1 200px"}}>
+                  <div style={{fontSize:10,fontWeight:600,color:C.muted,textTransform:"uppercase",letterSpacing:".4px",marginBottom:6}}>By Property Type</div>
+                  {allTypes.map(t=>{const cnt=ACTIVE.filter(b=>b.type===t).length;const pct=Math.round(cnt/ACTIVE.length*100);return(
+                    <div key={t} style={{display:"flex",alignItems:"center",gap:8,marginBottom:4}}>
+                      <div style={{fontSize:11,color:C.text,width:100}}>{t}</div>
+                      <div style={{flex:1,height:5,background:C.border,borderRadius:3}}><div style={{height:5,borderRadius:3,width:`${pct}%`,background:C.accent}}/></div>
+                      <div style={{fontSize:10,color:C.muted,width:40,textAlign:"right"}}>{cnt}</div>
+                    </div>
+                  );})}
+                </div>
+                <div style={{flex:"1 1 200px"}}>
+                  <div style={{fontSize:10,fontWeight:600,color:C.muted,textTransform:"uppercase",letterSpacing:".4px",marginBottom:6}}>Top States</div>
+                  {[...new Set(ACTIVE.map(b=>b.state))].map(s=>({s,c:ACTIVE.filter(b=>b.state===s).length})).sort((a,b)=>b.c-a.c).slice(0,12).map(({s,c})=>{const pct=Math.round(c/ACTIVE.length*100);return(
+                    <div key={s} style={{display:"flex",alignItems:"center",gap:8,marginBottom:4}}>
+                      <div style={{fontSize:11,color:C.text,width:30}}>{s}</div>
+                      <div style={{flex:1,height:5,background:C.border,borderRadius:3}}><div style={{height:5,borderRadius:3,width:`${pct}%`,background:C.cyan}}/></div>
+                      <div style={{fontSize:10,color:C.muted,width:40,textAlign:"right"}}>{c}</div>
+                    </div>
+                  );})}
+                </div>
+              </div>
+            </Card>
+          </div>
+        )}
+
+        {/* ACTION ITEMS */}
+        {tab==="actions" && (()=>{
+          const filteredActions=actionItems.filter(a=>{
+            if(actionFilter.status!=="all"&&a.status!==actionFilter.status)return false;
+            if(actionFilter.priority!=="all"&&a.priority!==actionFilter.priority)return false;
+            if(actionFilter.category!=="all"&&a.category!==actionFilter.category)return false;
+            if(actionFilter.building&&!a.building.toLowerCase().includes(actionFilter.building.toLowerCase()))return false;
+            return true;
+          });
+          const openCt=actionItems.filter(a=>a.status==="open").length;
+          const inProgCt=actionItems.filter(a=>a.status==="in-progress").length;
+          const completedCt=actionItems.filter(a=>a.status==="completed").length;
+          const highPriCt=actionItems.filter(a=>a.priority==="high"&&a.status!=="completed").length;
+          const overdueCt=actionItems.filter(a=>a.status!=="completed"&&dF(a.dueDate)<0).length;
+          const categories=[...new Set(actionItems.map(a=>a.category))].sort();
+          const pColor={high:C.nonCompliant,medium:C.atRisk,low:C.compliant};
+          const sColor={open:C.blue,"in-progress":C.atRisk,completed:C.compliant};
+
+          return(
+            <div style={{display:"flex",flexDirection:"column",gap:12}}>
+              <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
+                <KpiCard label="Open Items" value={openCt} sub="Need attention" color={C.blue}/>
+                <KpiCard label="In Progress" value={inProgCt} sub="Being worked on" color={C.atRisk}/>
+                <KpiCard label="Completed" value={completedCt} sub="Done" color={C.compliant}/>
+                <KpiCard label="High Priority" value={highPriCt} sub="Urgent items" color={C.nonCompliant}/>
+                <KpiCard label="Overdue" value={overdueCt} sub="Past due date" color={C.nonCompliant}/>
+              </div>
+
+              <Card>
+                <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",flexWrap:"wrap",gap:8,marginBottom:12}}>
+                  <div>
+                    <div style={{fontSize:13,fontWeight:700,color:C.bright}}>Action Item Tracker</div>
+                    <div style={{fontSize:10,color:C.muted,marginTop:2}}>Track compliance tasks, audits, filings, and remediation work</div>
+                  </div>
+                  <div style={{display:"flex",gap:6,alignItems:"center",flexWrap:"wrap"}}>
+                    <input value={actionFilter.building} onChange={e=>setActionFilter(f=>({...f,building:e.target.value}))} placeholder="Filter building..." style={{padding:"4px 8px",borderRadius:6,border:`1px solid ${C.border}`,background:C.card2,color:C.bright,fontSize:10,width:120}}/>
+                    <select value={actionFilter.status} onChange={e=>setActionFilter(f=>({...f,status:e.target.value}))} style={{padding:"4px 8px",borderRadius:6,border:`1px solid ${C.border}`,background:C.card2,color:C.text,fontSize:10}}>
+                      <option value="all">All Status</option>
+                      <option value="open">Open</option>
+                      <option value="in-progress">In Progress</option>
+                      <option value="completed">Completed</option>
+                    </select>
+                    <select value={actionFilter.priority} onChange={e=>setActionFilter(f=>({...f,priority:e.target.value}))} style={{padding:"4px 8px",borderRadius:6,border:`1px solid ${C.border}`,background:C.card2,color:C.text,fontSize:10}}>
+                      <option value="all">All Priority</option>
+                      <option value="high">High</option>
+                      <option value="medium">Medium</option>
+                      <option value="low">Low</option>
+                    </select>
+                    <select value={actionFilter.category} onChange={e=>setActionFilter(f=>({...f,category:e.target.value}))} style={{padding:"4px 8px",borderRadius:6,border:`1px solid ${C.border}`,background:C.card2,color:C.text,fontSize:10}}>
+                      <option value="all">All Categories</option>
+                      {categories.map(c=><option key={c} value={c}>{c}</option>)}
+                    </select>
+                    <button onClick={()=>setNewAction({title:"",building:"",priority:"medium",category:"General",dueDate:addD(30),assignee:""})} style={{padding:"4px 12px",borderRadius:6,fontSize:10,cursor:"pointer",border:`1px solid ${C.accent}`,background:`${C.accent}20`,color:C.accent,fontWeight:700}}>+ New Item</button>
+                  </div>
+                </div>
+
+                {newAction&&(
+                  <div style={{background:`${C.accent}08`,border:`1px solid ${C.accent}40`,borderRadius:8,padding:14,marginBottom:12}}>
+                    <div style={{fontSize:12,fontWeight:700,color:C.accent,marginBottom:10}}>New Action Item</div>
+                    <div style={{display:"flex",gap:8,flexWrap:"wrap",marginBottom:8}}>
+                      <input value={newAction.title} onChange={e=>setNewAction(a=>({...a,title:e.target.value}))} placeholder="Action item title..." style={{flex:"2 1 200px",padding:"6px 10px",borderRadius:6,border:`1px solid ${C.border}`,background:C.card2,color:C.bright,fontSize:11}}/>
+                      <select value={newAction.building||""} onChange={e=>setNewAction(a=>({...a,building:e.target.value,buildingId:ACTIVE.find(b=>b.name===e.target.value)?.id}))} style={{flex:"1 1 150px",padding:"6px 8px",borderRadius:6,border:`1px solid ${C.border}`,background:C.card2,color:C.text,fontSize:10}}>
+                        <option value="">Select Building...</option>
+                        {ACTIVE.map(b=><option key={b.id} value={b.name}>{b.name}</option>)}
+                      </select>
+                    </div>
+                    <div style={{display:"flex",gap:8,flexWrap:"wrap",alignItems:"center"}}>
+                      <select value={newAction.priority} onChange={e=>setNewAction(a=>({...a,priority:e.target.value}))} style={{padding:"6px 8px",borderRadius:6,border:`1px solid ${C.border}`,background:C.card2,color:C.text,fontSize:10}}>
+                        <option value="high">High Priority</option>
+                        <option value="medium">Medium Priority</option>
+                        <option value="low">Low Priority</option>
+                      </select>
+                      <select value={newAction.category} onChange={e=>setNewAction(a=>({...a,category:e.target.value}))} style={{padding:"6px 8px",borderRadius:6,border:`1px solid ${C.border}`,background:C.card2,color:C.text,fontSize:10}}>
+                        {["Audit","Benchmarking","BPS Filing","Incentive","Capital","Maintenance","General"].map(c=><option key={c} value={c}>{c}</option>)}
+                      </select>
+                      <input type="date" value={newAction.dueDate} onChange={e=>setNewAction(a=>({...a,dueDate:e.target.value}))} style={{padding:"6px 8px",borderRadius:6,border:`1px solid ${C.border}`,background:C.card2,color:C.text,fontSize:10}}/>
+                      <input value={newAction.assignee} onChange={e=>setNewAction(a=>({...a,assignee:e.target.value}))} placeholder="Assignee..." style={{padding:"6px 10px",borderRadius:6,border:`1px solid ${C.border}`,background:C.card2,color:C.bright,fontSize:10,width:120}}/>
+                      <div style={{marginLeft:"auto",display:"flex",gap:6}}>
+                        <button onClick={()=>setNewAction(null)} style={{padding:"5px 12px",borderRadius:6,fontSize:10,cursor:"pointer",border:`1px solid ${C.border}`,background:"transparent",color:C.muted}}>Cancel</button>
+                        <button onClick={()=>{if(newAction.title&&newAction.building)addActionItem(newAction);}} style={{padding:"5px 12px",borderRadius:6,fontSize:10,cursor:"pointer",border:`1px solid ${C.compliant}`,background:`${C.compliant}20`,color:C.compliant,fontWeight:700}}>Add Item</button>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                <div style={{display:"flex",flexDirection:"column",gap:3}}>
+                  {filteredActions.map(a=>{
+                    const daysLeft=dF(a.dueDate);
+                    const isOverdue=a.status!=="completed"&&daysLeft<0;
+                    const isOpen=expandedAction===a.id;
+                    return(
+                      <div key={a.id}>
+                        <div onClick={()=>setExpandedAction(isOpen?null:a.id)} style={{display:"flex",alignItems:"center",gap:8,padding:"8px 12px",background:isOpen?`${C.accent}08`:C.card2,borderRadius:isOpen?"6px 6px 0 0":6,border:`1px solid ${isOpen?C.accent:C.border}`,cursor:"pointer",transition:"all .15s"}}>
+                          <input type="checkbox" checked={a.status==="completed"} onChange={e=>{e.stopPropagation();updateActionItem(a.id,{status:a.status==="completed"?"open":"completed"});}} style={{cursor:"pointer",accentColor:C.compliant}}/>
+                          <span style={{padding:"2px 6px",borderRadius:4,fontSize:9,fontWeight:700,background:`${pColor[a.priority]}20`,color:pColor[a.priority],border:`1px solid ${pColor[a.priority]}40`,textTransform:"uppercase"}}>{a.priority}</span>
+                          <div style={{flex:1,fontWeight:600,color:a.status==="completed"?C.muted:C.bright,textDecoration:a.status==="completed"?"line-through":"none",fontSize:12}}>{a.title}</div>
+                          <span style={{padding:"2px 7px",borderRadius:4,fontSize:9,background:`${C.accent}15`,border:`1px solid ${C.accent}30`,color:C.accent}}>{a.category}</span>
+                          <div style={{fontSize:10,color:C.muted,width:90,textAlign:"right"}}>{a.building.split(" ").slice(0,2).join(" ")}</div>
+                          <div style={{fontSize:10,color:isOverdue?C.nonCompliant:daysLeft<=7?C.atRisk:C.muted,fontWeight:isOverdue?700:400,width:70,textAlign:"right"}}>{isOverdue?`${Math.abs(daysLeft)}d overdue`:a.status==="completed"?"Done":`${daysLeft}d left`}</div>
+                          <span style={{padding:"2px 7px",borderRadius:4,fontSize:9,fontWeight:600,background:`${sColor[a.status]}15`,color:sColor[a.status],border:`1px solid ${sColor[a.status]}40`}}>{a.status}</span>
+                          <div style={{fontSize:10,color:C.muted}}>{isOpen?"▲":"▼"}</div>
+                        </div>
+                        {isOpen&&(
+                          <div style={{background:`${C.accent}05`,border:`1px solid ${C.accent}`,borderTop:"none",borderRadius:"0 0 6px 6px",padding:"12px 14px"}}>
+                            <div style={{display:"flex",gap:16,flexWrap:"wrap",marginBottom:10}}>
+                              {[{label:"Building",value:a.building},{label:"Category",value:a.category},{label:"Assignee",value:a.assignee||"Unassigned"},{label:"Created",value:$dt(a.created)},{label:"Due Date",value:$dt(a.dueDate),color:isOverdue?C.nonCompliant:C.muted},{label:"Days Remaining",value:isOverdue?`${Math.abs(daysLeft)} OVERDUE`:a.status==="completed"?"Completed":`${daysLeft} days`,color:isOverdue?C.nonCompliant:daysLeft<=7?C.atRisk:C.compliant}].map(({label,value,color})=>(
+                                <div key={label} style={{minWidth:120}}>
+                                  <div style={{fontSize:9,color:C.muted,textTransform:"uppercase",letterSpacing:".4px",marginBottom:2}}>{label}</div>
+                                  <div style={{fontSize:12,fontWeight:600,color:color||C.bright}}>{value}</div>
+                                </div>
+                              ))}
+                            </div>
+                            <div style={{display:"flex",gap:6,marginTop:8}}>
+                              <span style={{fontSize:10,color:C.muted}}>Status:</span>
+                              {["open","in-progress","completed"].map(s=>(
+                                <button key={s} onClick={()=>updateActionItem(a.id,{status:s})} style={{padding:"3px 9px",borderRadius:4,fontSize:9,cursor:"pointer",border:`1px solid ${a.status===s?sColor[s]:C.border}`,background:a.status===s?`${sColor[s]}20`:"transparent",color:a.status===s?sColor[s]:C.muted,fontWeight:a.status===s?700:400}}>{s}</button>
+                              ))}
+                              <button onClick={()=>deleteActionItem(a.id)} style={{marginLeft:"auto",padding:"3px 9px",borderRadius:4,fontSize:9,cursor:"pointer",border:`1px solid ${C.nonCompliant}40`,background:`${C.nonCompliant}10`,color:C.nonCompliant}}>Delete</button>
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                  {filteredActions.length===0&&<div style={{padding:20,textAlign:"center",color:C.muted,fontSize:12}}>No action items match the current filters.</div>}
+                </div>
+
+                <div style={{marginTop:10,fontSize:10,color:C.muted,textAlign:"right"}}>{filteredActions.length} of {actionItems.length} items shown</div>
+              </Card>
+            </div>
+          );
+        })()}
+
+        {/* JURISDICTION MAP */}
+        {tab==="map" && (()=>{
+          const stateData={};
+          ACTIVE.forEach(b=>{
+            if(!stateData[b.state])stateData[b.state]={count:0,compliant:0,atRisk:0,nonCompliant:0,totalPen:0,totalSF:0,bpsCount:0,buildings:[]};
+            const sd=stateData[b.state];
+            sd.count++;sd.totalPen+=b.penalty;sd.totalSF+=b.sf;
+            if(b.bpsJuris)sd.bpsCount++;
+            if(b.status==="Compliant")sd.compliant++;
+            else if(b.status==="At-Risk")sd.atRisk++;
+            else sd.nonCompliant++;
+            sd.buildings.push(b);
+          });
+          const stateList=Object.entries(stateData).sort((a,b)=>b[1].count-a[1].count);
+          const [mapHover,setMapHover]=useState(null);
+          const [mapSelected,setMapSelected]=useState(null);
+          const jurisList=[...new Set(ACTIVE.filter(b=>b.juris&&b.juris!=="N/A").map(b=>b.juris))].sort();
+          const jurisData={};
+          ACTIVE.filter(b=>b.juris&&b.juris!=="N/A").forEach(b=>{
+            if(!jurisData[b.juris])jurisData[b.juris]={count:0,compliant:0,atRisk:0,nonCompliant:0,totalPen:0,totalSF:0};
+            const jd=jurisData[b.juris];
+            jd.count++;jd.totalPen+=b.penalty;jd.totalSF+=b.sf;
+            if(b.status==="Compliant")jd.compliant++;
+            else if(b.status==="At-Risk")jd.atRisk++;
+            else jd.nonCompliant++;
+          });
+
+          const selData=mapSelected?stateData[mapSelected]:null;
+          const stateColor=(st)=>{
+            const d=stateData[st];
+            if(!d)return C.border;
+            const ncPct=d.nonCompliant/d.count;
+            if(ncPct>0.4)return C.nonCompliant;
+            if(ncPct>0.15||d.atRisk/d.count>0.3)return C.atRisk;
+            return C.compliant;
+          };
+
+          return(
+            <div style={{display:"flex",flexDirection:"column",gap:12}}>
+              <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
+                <KpiCard label="States" value={stateList.length} sub="With portfolio assets" color={C.blue}/>
+                <KpiCard label="BPS Jurisdictions" value={jurisList.length} sub="Active programs" color={C.cyan}/>
+                <KpiCard label="Covered Buildings" value={ACTIVE.filter(b=>b.covered).length} sub="Subject to BPS" color={C.accent}/>
+                <KpiCard label="States w/ Penalties" value={stateList.filter(([,d])=>d.totalPen>0).length} sub="Non-zero exposure" color={C.nonCompliant}/>
+              </div>
+
+              <div style={{display:"flex",gap:12,flexWrap:"wrap"}}>
+                <Card style={{flex:"2 1 400px"}}>
+                  <div style={{fontSize:13,fontWeight:700,color:C.bright,marginBottom:4}}>Portfolio by State</div>
+                  <div style={{fontSize:10,color:C.muted,marginBottom:12}}>Click a state to drill down. Colors indicate compliance health.</div>
+
+                  <svg viewBox="0 0 900 600" style={{width:"100%",maxHeight:380}}>
+                    <rect width="900" height="600" fill={C.bg} rx="8"/>
+                    {Object.entries(US_STATES).map(([st,path])=>{
+                      const d=stateData[st];
+                      const fill=d?stateColor(st):`${C.border}60`;
+                      const isHov=mapHover===st;
+                      const isSel=mapSelected===st;
+                      return(
+                        <g key={st}>
+                          <path d={path} fill={isSel?`${C.accent}80`:isHov?`${fill}cc`:fill} stroke={isSel?C.accent:isHov?C.bright:`${C.border}`} strokeWidth={isSel?2.5:isHov?1.5:0.8} style={{cursor:d?"pointer":"default",transition:"all .15s"}} onMouseEnter={()=>setMapHover(st)} onMouseLeave={()=>setMapHover(null)} onClick={()=>d&&setMapSelected(mapSelected===st?null:st)}/>
+                          {d&&(
+                            <text x={parseInt(path.match(/M(\d+)/)?.[1]||0)+25} y={parseInt(path.match(/M\d+,(\d+)/)?.[1]||0)+30} fill={C.bright} fontSize="11" fontWeight="700" textAnchor="middle" pointerEvents="none">{st}</text>
+                          )}
+                        </g>
+                      );
+                    })}
+                    {mapHover&&stateData[mapHover]&&(
+                      <g>
+                        <rect x="620" y="20" width="260" height="80" rx="6" fill={C.card} stroke={C.border}/>
+                        <text x="635" y="42" fill={C.bright} fontSize="13" fontWeight="700">{mapHover} — {stateData[mapHover].count} buildings</text>
+                        <text x="635" y="58" fill={C.compliant} fontSize="10">{stateData[mapHover].compliant} compliant</text>
+                        <text x="735" y="58" fill={C.atRisk} fontSize="10">{stateData[mapHover].atRisk} at-risk</text>
+                        <text x="635" y="74" fill={C.nonCompliant} fontSize="10">{stateData[mapHover].nonCompliant} non-compliant</text>
+                        <text x="635" y="90" fill={C.muted} fontSize="10">Penalties: {$usd(stateData[mapHover].totalPen)}</text>
+                      </g>
+                    )}
+                    <g>
+                      {[{color:C.compliant,label:"Mostly Compliant"},{color:C.atRisk,label:"Mixed / At-Risk"},{color:C.nonCompliant,label:"High Non-Compliance"}].map(({color,label},i)=>(
+                        <g key={label}>
+                          <rect x={20+i*150} y={565} width={12} height={12} rx={2} fill={color}/>
+                          <text x={36+i*150} y={576} fill={C.muted} fontSize="10">{label}</text>
+                        </g>
+                      ))}
+                    </g>
+                  </svg>
+                </Card>
+
+                <Card style={{flex:"1 1 280px"}}>
+                  <div style={{fontSize:13,fontWeight:700,color:C.bright,marginBottom:8}}>BPS Programs by Jurisdiction</div>
+                  <div style={{display:"flex",flexDirection:"column",gap:4,maxHeight:400,overflowY:"auto"}}>
+                    {Object.entries(jurisData).sort((a,b)=>b[1].count-a[1].count).map(([juris,d])=>{
+                      const ncPct=Math.round(d.nonCompliant/d.count*100);
+                      return(
+                        <div key={juris} style={{padding:"8px 10px",background:C.card2,borderRadius:6,border:`1px solid ${C.border}`}}>
+                          <div style={{display:"flex",justifyContent:"space-between",marginBottom:4}}>
+                            <div style={{fontSize:11,fontWeight:700,color:C.cyan}}>{juris}</div>
+                            <div style={{fontSize:10,color:C.muted}}>{d.count} bldgs</div>
+                          </div>
+                          <div style={{display:"flex",gap:8,fontSize:9,marginBottom:4}}>
+                            <span style={{color:C.compliant}}>{d.compliant} OK</span>
+                            <span style={{color:C.atRisk}}>{d.atRisk} risk</span>
+                            <span style={{color:C.nonCompliant}}>{d.nonCompliant} NC</span>
+                          </div>
+                          <div style={{display:"flex",alignItems:"center",gap:6}}>
+                            <div style={{flex:1,height:4,background:C.border,borderRadius:2}}>
+                              <div style={{height:4,borderRadius:2,width:`${100-ncPct}%`,background:ncPct>40?C.nonCompliant:ncPct>15?C.atRisk:C.compliant}}/>
+                            </div>
+                            <span style={{fontSize:9,color:C.muted}}>{$usd(d.totalPen)}</span>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </Card>
+              </div>
+
+              {selData&&(
+                <Card style={{borderTop:`2px solid ${C.accent}`}}>
+                  <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:10}}>
+                    <div>
+                      <div style={{fontSize:14,fontWeight:700,color:C.accent}}>{mapSelected} — {selData.count} Buildings</div>
+                      <div style={{fontSize:11,color:C.muted,marginTop:2}}>{$n(selData.totalSF)} total SF · {selData.bpsCount} in BPS jurisdiction · {$usd(selData.totalPen)} penalty exposure</div>
+                    </div>
+                    <button onClick={()=>setMapSelected(null)} style={{padding:"4px 10px",borderRadius:6,fontSize:10,cursor:"pointer",border:`1px solid ${C.border}`,background:C.card2,color:C.muted}}>Close</button>
+                  </div>
+                  <div style={{overflowX:"auto",maxHeight:300}}>
+                    <table style={{width:"100%",borderCollapse:"collapse",fontSize:11}}>
+                      <thead>
+                        <tr>{["Building","City","Type","SF","Status","EUI","Target","E★","Jurisdiction","Penalty"].map(h=><th key={h} style={{padding:"6px 10px",textAlign:"left",color:C.muted,fontWeight:600,fontSize:10,borderBottom:`1px solid ${C.border}`,background:C.card2}}>{h}</th>)}</tr>
+                      </thead>
+                      <tbody>
+                        {selData.buildings.sort((a,b)=>b.penalty-a.penalty).map((b,i)=>(
+                          <tr key={b.id} style={{borderBottom:`1px solid ${C.border}`,background:i%2===0?"transparent":C.card2}}>
+                            <td style={{padding:"6px 10px",color:C.bright,fontWeight:600,whiteSpace:"nowrap"}}>{b.name}</td>
+                            <td style={{padding:"6px 10px",color:C.muted}}>{b.city}</td>
+                            <td style={{padding:"6px 10px",color:C.muted}}>{b.type}</td>
+                            <td style={{padding:"6px 10px",color:C.muted,textAlign:"right"}}>{$n(b.sf)}</td>
+                            <td style={{padding:"6px 10px"}}><span style={sBadge(b.status)}>{b.status}</span></td>
+                            <td style={{padding:"6px 10px",textAlign:"right",fontWeight:700,color:b.eui>b.target?C.nonCompliant:C.compliant}}>{b.eui??"—"}</td>
+                            <td style={{padding:"6px 10px",textAlign:"right",color:C.muted}}>{b.target??"—"}</td>
+                            <td style={{padding:"6px 10px",textAlign:"right",fontWeight:700,color:b.eStar>=75?C.compliant:b.eStar>=50?C.atRisk:C.nonCompliant}}>{b.eStar??"—"}</td>
+                            <td style={{padding:"6px 10px",color:C.cyan,fontSize:10}}>{b.juris}</td>
+                            <td style={{padding:"6px 10px",textAlign:"right",fontWeight:700,color:b.penalty>0?C.nonCompliant:C.compliant}}>{b.penalty>0?$usd(b.penalty):"—"}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </Card>
+              )}
+
+              <Card>
+                <div style={{fontSize:13,fontWeight:700,color:C.bright,marginBottom:8}}>State Compliance Summary</div>
+                <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(180px,1fr))",gap:6}}>
+                  {stateList.map(([st,d])=>{
+                    const compPct=Math.round(d.compliant/d.count*100);
+                    return(
+                      <div key={st} onClick={()=>setMapSelected(mapSelected===st?null:st)} style={{padding:"8px 10px",background:mapSelected===st?`${C.accent}12`:C.card2,borderRadius:6,border:`1px solid ${mapSelected===st?C.accent:C.border}`,cursor:"pointer",transition:"all .15s"}}>
+                        <div style={{display:"flex",justifyContent:"space-between",marginBottom:4}}>
+                          <span style={{fontSize:12,fontWeight:800,color:C.bright}}>{st}</span>
+                          <span style={{fontSize:10,color:C.muted}}>{d.count} bldgs</span>
+                        </div>
+                        <div style={{height:5,background:C.border,borderRadius:3,marginBottom:4}}>
+                          <div style={{height:5,borderRadius:3,width:`${compPct}%`,background:compPct>=70?C.compliant:compPct>=40?C.atRisk:C.nonCompliant}}/>
+                        </div>
+                        <div style={{display:"flex",justifyContent:"space-between",fontSize:9}}>
+                          <span style={{color:C.compliant}}>{d.compliant} OK</span>
+                          <span style={{color:d.totalPen>0?C.nonCompliant:C.muted}}>{d.totalPen>0?$usd(d.totalPen):"No penalties"}</span>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </Card>
+            </div>
+          );
+        })()}
+
+        {/* NOTES & ANNOTATIONS */}
+        {tab==="notes" && (()=>{
+          const allTags=["General","Compliance","Audit","Filing","Benchmarking","Incentive","Capital","Maintenance"];
+          const tagColor={General:C.muted,Compliance:C.accent,Audit:C.purple,Filing:C.cyan,Benchmarking:C.blue,Incentive:C.compliant,Capital:C.atRisk,Maintenance:C.orange};
+          const bldgsWithNotes=Object.keys(buildingNotes).map(Number).filter(id=>buildingNotes[id]?.length>0);
+          const totalNotes=Object.values(buildingNotes).reduce((a,b)=>a+(b?.length||0),0);
+          const noteBlds=ACTIVE.filter(b=>notesBldSearch?b.name.toLowerCase().includes(notesBldSearch.toLowerCase()):true);
+          const selBld=selectedNoteBld?ACTIVE.find(b=>b.id===selectedNoteBld):null;
+          const selNotes=(selectedNoteBld?buildingNotes[selectedNoteBld]:[])||[];
+          const filteredNotes=notesFilterTag==="all"?selNotes:selNotes.filter(n=>n.tag===notesFilterTag);
+
+          return(
+            <div style={{display:"flex",flexDirection:"column",gap:12}}>
+              <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
+                <KpiCard label="Total Notes" value={totalNotes} sub="Across portfolio" color={C.accent}/>
+                <KpiCard label="Buildings w/ Notes" value={bldgsWithNotes.length} sub={`of ${ACTIVE.length} active`} color={C.blue}/>
+                <KpiCard label="Tags Used" value={allTags.length} sub="Categories" color={C.purple}/>
+              </div>
+
+              <div style={{display:"flex",gap:12,minHeight:500}}>
+                {/* Building selector sidebar */}
+                <Card style={{width:260,flexShrink:0,display:"flex",flexDirection:"column",padding:0,overflow:"hidden"}}>
+                  <div style={{padding:"10px 12px",borderBottom:`1px solid ${C.border}`}}>
+                    <input value={notesBldSearch} onChange={e=>setNotesBldSearch(e.target.value)} placeholder="Search buildings..." style={{width:"100%",padding:"5px 8px",borderRadius:6,border:`1px solid ${C.border}`,background:C.card2,color:C.bright,fontSize:11,boxSizing:"border-box"}}/>
+                  </div>
+                  <div style={{flex:1,overflowY:"auto"}}>
+                    {noteBlds.map(b=>{
+                      const nc=(buildingNotes[b.id]||[]).length;
+                      const isSel=selectedNoteBld===b.id;
+                      return(
+                        <div key={b.id} onClick={()=>{setSelectedNoteBld(b.id);setNotesFilterTag("all");}} style={{display:"flex",alignItems:"center",gap:6,padding:"7px 12px",cursor:"pointer",background:isSel?`${C.accent}12`:"transparent",borderLeft:`3px solid ${isSel?C.accent:"transparent"}`,borderBottom:`1px solid ${C.border}`,transition:"all .1s"}}>
+                          <div style={{flex:1,overflow:"hidden"}}>
+                            <div style={{fontSize:11,fontWeight:isSel?700:500,color:isSel?C.bright:C.text,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{b.name}</div>
+                            <div style={{fontSize:9,color:C.muted}}>{b.city}, {b.state}</div>
+                          </div>
+                          {nc>0&&<span style={{padding:"1px 6px",borderRadius:10,fontSize:9,fontWeight:700,background:`${C.accent}20`,color:C.accent,border:`1px solid ${C.accent}30`}}>{nc}</span>}
+                        </div>
+                      );
+                    })}
+                  </div>
+                </Card>
+
+                {/* Notes panel */}
+                <div style={{flex:1,display:"flex",flexDirection:"column",gap:10}}>
+                  {selBld?(
+                    <>
+                      <Card style={{paddingBottom:10}}>
+                        <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:8}}>
+                          <div>
+                            <div style={{fontSize:14,fontWeight:700,color:C.bright}}>{selBld.name}</div>
+                            <div style={{fontSize:11,color:C.muted}}>{selBld.city}, {selBld.state} · {selBld.type} · {$n(selBld.sf)} SF · <span style={sBadge(selBld.status)}>{selBld.status}</span></div>
+                          </div>
+                          <div style={{textAlign:"right"}}>
+                            <div style={{fontSize:10,color:C.muted}}>EUI: <span style={{color:selBld.eui>selBld.target?C.nonCompliant:C.compliant,fontWeight:700}}>{selBld.eui}</span> / {selBld.target}</div>
+                            <div style={{fontSize:10,color:C.muted}}>Penalty: <span style={{color:selBld.penalty>0?C.nonCompliant:C.compliant,fontWeight:700}}>{selBld.penalty>0?$usd(selBld.penalty):"None"}</span></div>
+                          </div>
+                        </div>
+
+                        {/* Add note form */}
+                        <div style={{display:"flex",gap:6,alignItems:"flex-end"}}>
+                          <div style={{flex:1}}>
+                            <textarea value={newNoteText} onChange={e=>setNewNoteText(e.target.value)} placeholder="Add a note about this building..." rows={2} style={{width:"100%",padding:"6px 10px",borderRadius:6,border:`1px solid ${C.border}`,background:C.card2,color:C.bright,fontSize:11,resize:"vertical",boxSizing:"border-box",fontFamily:"inherit"}}/>
+                          </div>
+                          <select value={newNoteTag} onChange={e=>setNewNoteTag(e.target.value)} style={{padding:"6px 8px",borderRadius:6,border:`1px solid ${C.border}`,background:C.card2,color:C.text,fontSize:10}}>
+                            {allTags.map(t=><option key={t} value={t}>{t}</option>)}
+                          </select>
+                          <button onClick={()=>addNote(selBld.id)} style={{padding:"6px 14px",borderRadius:6,fontSize:10,cursor:"pointer",border:`1px solid ${C.accent}`,background:`${C.accent}20`,color:C.accent,fontWeight:700,whiteSpace:"nowrap"}}>Add Note</button>
+                        </div>
+                      </Card>
+
+                      <div style={{display:"flex",gap:4,alignItems:"center"}}>
+                        <span style={{fontSize:10,color:C.muted}}>Filter:</span>
+                        {["all",...allTags].map(t=>(
+                          <button key={t} onClick={()=>setNotesFilterTag(t)} style={{padding:"2px 8px",borderRadius:12,fontSize:9,cursor:"pointer",border:`1px solid ${notesFilterTag===t?(tagColor[t]||C.accent):C.border}`,background:notesFilterTag===t?`${tagColor[t]||C.accent}20`:"transparent",color:notesFilterTag===t?(tagColor[t]||C.accent):C.muted}}>{t==="all"?"All":t}</button>
+                        ))}
+                        <span style={{fontSize:10,color:C.muted,marginLeft:"auto"}}>{filteredNotes.length} note{filteredNotes.length!==1?"s":""}</span>
+                      </div>
+
+                      <div style={{display:"flex",flexDirection:"column",gap:6}}>
+                        {filteredNotes.map(n=>(
+                          <Card key={n.id} style={{borderLeft:`3px solid ${tagColor[n.tag]||C.muted}`}}>
+                            <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:6}}>
+                              <div style={{display:"flex",gap:6,alignItems:"center"}}>
+                                <span style={{padding:"1px 7px",borderRadius:10,fontSize:9,fontWeight:600,background:`${tagColor[n.tag]||C.muted}20`,color:tagColor[n.tag]||C.muted,border:`1px solid ${tagColor[n.tag]||C.muted}30`}}>{n.tag}</span>
+                                <span style={{fontSize:10,color:C.muted}}>{n.author}</span>
+                                <span style={{fontSize:10,color:C.muted}}>· {$dt(n.ts)}</span>
+                              </div>
+                              <button onClick={()=>deleteNote(selBld.id,n.id)} style={{padding:"2px 6px",borderRadius:4,fontSize:9,cursor:"pointer",border:`1px solid ${C.border}`,background:"transparent",color:C.muted}}>x</button>
+                            </div>
+                            <div style={{fontSize:12,color:C.text,lineHeight:1.5}}>{n.text}</div>
+                          </Card>
+                        ))}
+                        {filteredNotes.length===0&&<div style={{padding:20,textAlign:"center",color:C.muted,fontSize:12}}>No notes {notesFilterTag!=="all"?`with tag "${notesFilterTag}" `:""}for this building yet.</div>}
+                      </div>
+                    </>
+                  ):(
+                    <Card style={{flex:1,display:"flex",alignItems:"center",justifyContent:"center"}}>
+                      <div style={{textAlign:"center",color:C.muted}}>
+                        <div style={{fontSize:32,marginBottom:8}}>✎</div>
+                        <div style={{fontSize:13,fontWeight:600}}>Select a building</div>
+                        <div style={{fontSize:11,marginTop:4}}>Choose a building from the list to view and add notes</div>
+                      </div>
+                    </Card>
+                  )}
+                </div>
+              </div>
+            </div>
+          );
+        })()}
+
+        {/* ENERGY STAR PORTFOLIO MANAGER */}
+        {tab==="energystar" && (()=>{
+          const espmBuildings=ACTIVE.map(b=>{
+            const override=espmScoreOverrides[b.id];
+            return{...b,pmScore:override?.pmScore||null,pmStatus:override?.status||"not-synced",pmPropertyId:override?.propertyId||null,pmLastSync:override?.lastSync||null,scoreDiff:override?override.pmScore-b.eStar:null};
+          });
+          const syncedCount=espmBuildings.filter(b=>b.pmStatus==="synced").length;
+          const avgPmScore=syncedCount?Math.round(espmBuildings.filter(b=>b.pmScore).reduce((a,b)=>a+b.pmScore,0)/syncedCount):0;
+          const certEligible=espmBuildings.filter(b=>b.pmScore&&b.pmScore>=75).length;
+          const filteredEspm=espmFilterScore==="all"?espmBuildings:espmFilterScore==="eligible"?espmBuildings.filter(b=>b.pmScore>=75):espmFilterScore==="below"?espmBuildings.filter(b=>b.pmScore&&b.pmScore<50):espmBuildings;
+
+          return(
+            <div style={{display:"flex",flexDirection:"column",gap:12}}>
+              <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
+                <KpiCard label="Connection" value={espmConnected?"Connected":"Not Connected"} sub={espmConnected?"API linked":"Set up below"} color={espmConnected?C.compliant:C.muted}/>
+                <KpiCard label="Properties Synced" value={syncedCount} sub={`of ${ACTIVE.length} buildings`} color={syncedCount>0?C.blue:C.muted}/>
+                <KpiCard label="Avg PM Score" value={avgPmScore||"—"} sub="Portfolio Manager" color={avgPmScore>=75?C.compliant:avgPmScore>=50?C.atRisk:avgPmScore?C.nonCompliant:C.muted}/>
+                <KpiCard label="Cert Eligible" value={certEligible} sub="Score >= 75" color={C.compliant}/>
+                <KpiCard label="Last Sync" value={espmLastSync?$dt(espmLastSync):"Never"} sub={espmSyncing?"Syncing...":"Ready"} color={espmLastSync?C.cyan:C.muted}/>
+              </div>
+
+              <Card>
+                <div style={{fontSize:13,fontWeight:700,color:C.bright,marginBottom:4}}>ENERGY STAR Portfolio Manager Integration</div>
+                <div style={{fontSize:11,color:C.muted,marginBottom:14}}>Connect to EPA's Portfolio Manager to sync ENERGY STAR scores, benchmarking data, and certification status.</div>
+
+                <div style={{display:"flex",gap:12,flexWrap:"wrap",marginBottom:14}}>
+                  <div style={{flex:"1 1 300px",padding:14,background:C.card2,borderRadius:8,border:`1px solid ${C.border}`}}>
+                    <div style={{fontSize:11,fontWeight:700,color:C.bright,marginBottom:8}}>API Configuration</div>
+                    <div style={{display:"flex",flexDirection:"column",gap:8}}>
+                      <div>
+                        <div style={{fontSize:10,color:C.muted,marginBottom:3}}>Portfolio Manager API Key</div>
+                        <div style={{display:"flex",gap:6}}>
+                          <input type="password" value={espmApiKey} onChange={e=>setEspmApiKey(e.target.value)} placeholder="Enter PM API key..." style={{flex:1,padding:"6px 10px",borderRadius:6,border:`1px solid ${C.border}`,background:C.bg,color:C.bright,fontSize:11}}/>
+                        </div>
+                      </div>
+                      <div>
+                        <div style={{fontSize:10,color:C.muted,marginBottom:3}}>Connection Status</div>
+                        <div style={{display:"flex",alignItems:"center",gap:6}}>
+                          <div style={{width:8,height:8,borderRadius:"50%",background:espmConnected?C.compliant:C.muted}}/>
+                          <span style={{fontSize:11,color:espmConnected?C.compliant:C.muted,fontWeight:600}}>{espmConnected?"Connected to Portfolio Manager":"Not connected"}</span>
+                        </div>
+                      </div>
+                      <button onClick={espmSimulateSync} disabled={espmSyncing} style={{padding:"8px 16px",borderRadius:6,fontSize:11,cursor:espmSyncing?"not-allowed":"pointer",border:`1px solid ${espmSyncing?C.muted:C.accent}`,background:espmSyncing?C.card2:`${C.accent}20`,color:espmSyncing?C.muted:C.accent,fontWeight:700}}>
+                        {espmSyncing?"Syncing...":espmConnected?"Re-sync All Properties":"Connect & Sync"}
+                      </button>
+                    </div>
+                  </div>
+
+                  <div style={{flex:"1 1 300px",padding:14,background:C.card2,borderRadius:8,border:`1px solid ${C.border}`}}>
+                    <div style={{fontSize:11,fontWeight:700,color:C.bright,marginBottom:8}}>Sync Summary</div>
+                    <div style={{display:"flex",flexDirection:"column",gap:6}}>
+                      {[{label:"Properties Matched",value:`${syncedCount} / ${ACTIVE.length}`,color:syncedCount>0?C.compliant:C.muted},{label:"Score Discrepancies",value:espmBuildings.filter(b=>b.scoreDiff&&Math.abs(b.scoreDiff)>5).length,color:C.atRisk},{label:"Certification Eligible",value:certEligible,color:C.compliant},{label:"Below Threshold (<50)",value:espmBuildings.filter(b=>b.pmScore&&b.pmScore<50).length,color:C.nonCompliant}].map(({label,value,color})=>(
+                        <div key={label} style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+                          <span style={{fontSize:11,color:C.muted}}>{label}</span>
+                          <span style={{fontSize:12,fontWeight:700,color}}>{value}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+
+                {espmConnected&&(
+                  <div style={{marginBottom:12}}>
+                    <div style={{fontSize:12,fontWeight:700,color:C.bright,marginBottom:8}}>Score Comparison: Dashboard vs. Portfolio Manager</div>
+                    <ResponsiveContainer width="100%" height={200}>
+                      <BarChart data={espmBuildings.filter(b=>b.pmScore).slice(0,20).map(b=>({name:b.name.split(" ").slice(0,2).join(" "),Dashboard:b.eStar,PM:b.pmScore}))} margin={{top:0,right:10,bottom:26,left:0}}>
+                        <CartesianGrid strokeDasharray="3 3" stroke={C.border}/>
+                        <XAxis dataKey="name" tick={{fill:C.muted,fontSize:8}} angle={-35} textAnchor="end" interval={0}/>
+                        <YAxis tick={{fill:C.muted,fontSize:10}} domain={[0,100]}/>
+                        <Tooltip {...tt}/>
+                        <Legend wrapperStyle={{fontSize:11}}/>
+                        <Bar dataKey="Dashboard" fill={C.accent} radius={[2,2,0,0]}/>
+                        <Bar dataKey="PM" fill={C.cyan} radius={[2,2,0,0]}/>
+                      </BarChart>
+                    </ResponsiveContainer>
+                  </div>
+                )}
+              </Card>
+
+              {espmConnected&&(
+                <Card>
+                  <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",flexWrap:"wrap",gap:8,marginBottom:12}}>
+                    <div>
+                      <div style={{fontSize:13,fontWeight:700,color:C.bright}}>Synced Properties</div>
+                      <div style={{fontSize:10,color:C.muted,marginTop:2}}>ENERGY STAR scores from Portfolio Manager vs. internal dashboard scores</div>
+                    </div>
+                    <div style={{display:"flex",gap:6}}>
+                      {[{v:"all",l:"All"},{v:"eligible",l:"Cert Eligible (75+)"},{v:"below",l:"Below 50"}].map(({v,l})=>(
+                        <button key={v} onClick={()=>setEspmFilterScore(v)} style={{padding:"3px 10px",borderRadius:20,fontSize:10,cursor:"pointer",border:`1px solid ${espmFilterScore===v?C.accent:C.border}`,background:espmFilterScore===v?`${C.accent}20`:"transparent",color:espmFilterScore===v?C.accent:C.muted}}>{l}</button>
+                      ))}
+                    </div>
+                  </div>
+
+                  <div style={{overflowX:"auto",maxHeight:400}}>
+                    <table style={{width:"100%",borderCollapse:"collapse",fontSize:11}}>
+                      <thead>
+                        <tr>{["Building","City","ST","Type","PM Property ID","Dashboard Score","PM Score","Diff","Status","Cert Eligible"].map(h=><th key={h} style={{padding:"7px 10px",textAlign:"left",color:C.muted,fontWeight:600,fontSize:10,borderBottom:`1px solid ${C.border}`,background:C.card2,whiteSpace:"nowrap"}}>{h}</th>)}</tr>
+                      </thead>
+                      <tbody>
+                        {filteredEspm.map((b,i)=>{
+                          const sc=b.pmScore?b.pmScore>=75?C.compliant:b.pmScore>=50?C.atRisk:C.nonCompliant:C.muted;
+                          const diffColor=b.scoreDiff?b.scoreDiff>0?C.compliant:b.scoreDiff<-5?C.nonCompliant:C.atRisk:C.muted;
+                          return(
+                            <tr key={b.id} style={{borderBottom:`1px solid ${C.border}`,background:i%2===0?"transparent":C.card2}}>
+                              <td style={{padding:"6px 10px",color:C.bright,fontWeight:600,whiteSpace:"nowrap"}}>{b.name}</td>
+                              <td style={{padding:"6px 10px",color:C.muted}}>{b.city}</td>
+                              <td style={{padding:"6px 10px",color:C.muted}}>{b.state}</td>
+                              <td style={{padding:"6px 10px",color:C.muted}}>{b.type}</td>
+                              <td style={{padding:"6px 10px",color:C.cyan,fontSize:10}}>{b.pmPropertyId||"—"}</td>
+                              <td style={{padding:"6px 10px",textAlign:"center"}}>
+                                <span style={{fontWeight:700,color:b.eStar>=75?C.compliant:b.eStar>=50?C.atRisk:C.nonCompliant}}>{b.eStar}</span>
+                              </td>
+                              <td style={{padding:"6px 10px",textAlign:"center"}}>
+                                <span style={{fontWeight:700,color:sc}}>{b.pmScore||"—"}</span>
+                              </td>
+                              <td style={{padding:"6px 10px",textAlign:"center",fontWeight:700,color:diffColor}}>
+                                {b.scoreDiff!=null?(b.scoreDiff>0?"+":"")+b.scoreDiff:"—"}
+                              </td>
+                              <td style={{padding:"6px 10px"}}>
+                                <span style={{padding:"2px 7px",borderRadius:4,fontSize:9,fontWeight:600,background:b.pmStatus==="synced"?`${C.compliant}15`:`${C.muted}15`,color:b.pmStatus==="synced"?C.compliant:C.muted,border:`1px solid ${b.pmStatus==="synced"?C.compliant:C.muted}40`}}>{b.pmStatus}</span>
+                              </td>
+                              <td style={{padding:"6px 10px",textAlign:"center",color:b.pmScore&&b.pmScore>=75?C.compliant:C.muted,fontWeight:600}}>
+                                {b.pmScore&&b.pmScore>=75?"Yes":"No"}
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                  <div style={{marginTop:8,fontSize:10,color:C.muted,textAlign:"right"}}>
+                    {filteredEspm.length} properties · Avg PM score: <span style={{color:C.purple,fontWeight:700}}>{avgPmScore}</span> · {certEligible} certification eligible
+                  </div>
+                </Card>
+              )}
+            </div>
+          );
+        })()}
       </div>
     </div>
   );
